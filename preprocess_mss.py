@@ -9,13 +9,15 @@ import time
 
 Pyear = 2024
 Pmonth = 7
+Pday = 11 # available data until 23h
 
 def save_data():
     t0 = time.time()
     data = {}
     from_date = datetime(year=Pyear, month=1, day=1)
-    # to_date = datetime(year=Pyear+1, month=1, day=1)
-    to_date = datetime(year=Pyear, month=Pmonth, day=1)
+    if Pmonth == 12 and Pday == 31:
+        to_date = datetime(year=Pyear+1, month=1, day=1)
+    to_date = datetime(year=Pyear, month=Pmonth, day=Pday+1)
     num_rows = (to_date - from_date) // timedelta(hours=1)
     cur = from_date
     i = 0
