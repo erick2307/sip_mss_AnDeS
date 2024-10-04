@@ -8,8 +8,8 @@ import numpy as np
 import time
 
 Pyear = 2024
-Pmonth = 7
-Pday = 11 # available data until 23h
+Pmonth = 10
+Pday = 3 # available data until 23h
 
 def save_data():
     t0 = time.time()
@@ -27,6 +27,8 @@ def save_data():
         
         if not os.path.isfile(path):
             print('passed')
+            cur += timedelta(hours=1)
+            i += 1
             continue
 
         df = pd.read_csv(path)
