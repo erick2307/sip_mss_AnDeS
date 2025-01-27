@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from datetime import datetime, timedelta
 
 import os
@@ -7,9 +5,9 @@ import pandas as pd
 import numpy as np
 import time
 
-Pyear = 2024
-Pmonth = 10
-Pday = 3 # available data until 23h
+Pyear = 2025
+Pmonth = 1
+Pday = 26 # available data until 23h
 
 def save_data():
     t0 = time.time()
@@ -17,7 +15,8 @@ def save_data():
     from_date = datetime(year=Pyear, month=1, day=1)
     if Pmonth == 12 and Pday == 31:
         to_date = datetime(year=Pyear+1, month=1, day=1)
-    to_date = datetime(year=Pyear, month=Pmonth, day=Pday+1)
+    else:
+        to_date = datetime(year=Pyear, month=Pmonth, day=Pday+1)
     num_rows = (to_date - from_date) // timedelta(hours=1)
     cur = from_date
     i = 0
