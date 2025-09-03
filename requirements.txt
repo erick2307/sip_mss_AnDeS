@@ -12,6 +12,7 @@ importlib_metadata
 ipykernel
 ipython
 jedi
+joblib
 jupyter_client
 jupyter_core
 llvmlite==0.43.0
