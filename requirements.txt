@@ -20,9 +20,9 @@ matplotlib
 matplotlib-inline
 nest_asyncio
 numba==0.60.0
-numpy==2.0.0
+numpy
 packaging
-pandas==2.2.2
+pandas
 parso
 pexpect
 pickleshare
@@ -45,5 +45,6 @@ traitlets
 types-python-dateutil==2.9.0.20240316
 typing_extensions
 tzdata==2024.1
+watchdog
 wcwidth
 zipp

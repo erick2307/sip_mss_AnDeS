@@ -1,0 +1,40 @@
+# ANDES 2025 Application Requirements
+# Web Framework
+streamlit>=1.28.0
+streamlit-option-menu>=0.3.6
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Visualization
+plotly>=5.15.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Date/Time Handling
+arrow>=1.2.3
+python-dateutil>=2.8.0
+
+# Progress Bars
+tqdm>=4.65.0
+
+# Optional - Enhanced Matrix Profile (install if available)
+# PySCAMP>=0.7.0
+
+# Data Validation
+pydantic>=2.0.0
+
+# File I/O
+h5py>=3.8.0
+
+# Configuration
+pyyaml>=6.0.0
+
+# Caching (optional)
+diskcache>=5.6.0
+
+# Testing (development)
+pytest>=7.4.0
+pytest-cov>=4.1.0
