@@ -18,6 +18,76 @@ except ImportError:
     USE_PYSCAMP = False
     print("⚠️  PySCAMP not available. Using custom implementation...")
 
+try:
+    import stumpy
+    
+    # Handle NumPy 2.0 compatibility issues for STUMPY
+    # STUMPY may use deprecated constants that were removed in NumPy 2.0
+    numpy_2_compat_applied = False
+    
+    if not hasattr(np, 'NINF'):
+        np.NINF = -np.inf
+        numpy_2_compat_applied = True
+    
+    if not hasattr(np, 'PINF'):
+        np.PINF = np.inf
+        numpy_2_compat_applied = True
+    
+    if not hasattr(np, 'NAN'):
+        np.NAN = np.nan
+        numpy_2_compat_applied = True
+    
+    if numpy_2_compat_applied:
+        print("🔧 Applied NumPy 2.0 compatibility patches for STUMPY")
+    
+    USE_STUMPY = True
+    print("✅ STUMPY imported successfully!")
+except ImportError as e:
+    USE_STUMPY = False
+    print(f"⚠️  STUMPY not available: {e}")
+except Exception as e:
+    USE_STUMPY = False
+    print(f"⚠️  STUMPY import failed: {e}")
+
+def check_numpy_stumpy_compatibility():
+    """
+    Check NumPy and STUMPY compatibility and provide guidance.
+    
+    Returns:
+        dict: Compatibility information and recommendations
+    """
+    info = {
+        'numpy_version': np.__version__,
+        'numpy_major': int(np.__version__.split('.')[0]),
+        'stumpy_available': USE_STUMPY,
+        'compatibility_patches_applied': False,
+        'recommendations': []
+    }
+    
+    # Check for NumPy 2.0+ compatibility issues
+    if info['numpy_major'] >= 2:
+        deprecated_attrs = ['NINF', 'PINF', 'NAN']
+        missing_attrs = [attr for attr in deprecated_attrs if not hasattr(np, attr)]
+        
+        if missing_attrs:
+            info['recommendations'].append(
+                f"NumPy 2.0+ detected. Missing deprecated attributes: {missing_attrs}"
+            )
+            info['recommendations'].append(
+                "Consider updating STUMPY to a NumPy 2.0 compatible version"
+            )
+        else:
+            info['compatibility_patches_applied'] = True
+    
+    if USE_STUMPY:
+        try:
+            import stumpy
+            info['stumpy_version'] = stumpy.__version__
+        except:
+            info['stumpy_version'] = 'unknown'
+    
+    return info
+
 class LazyDatabase:
     """
     Memory-efficient database class that loads data on-demand.
@@ -97,7 +167,7 @@ class LazyDatabase:
             'loads_performed': self._load_count
         }
 
-def custom_matrix_profile(T, m, normalize=False):
+def custom_matrix_profile(T, m, normalize=False, use_left_mp=False):
     """
     Custom implementation of matrix profile calculation.
     
@@ -105,6 +175,7 @@ def custom_matrix_profile(T, m, normalize=False):
         T: Time series data
         m: Subsequence length (window size)
         normalize: Whether to normalize the data
+        use_left_mp: If True, only consider past data (j < i) for nearest neighbor search
         
     Returns:
         numpy.ndarray: Matrix profile distances
@@ -125,7 +196,9 @@ def custom_matrix_profile(T, m, normalize=False):
             continue
         
         # Calculate distances to all other subsequences
-        for j in range(n - m + 1):
+        search_range = range(i) if use_left_mp else range(n - m + 1)
+        
+        for j in search_range:
             if abs(i - j) < m:  # Skip trivial matches
                 continue
                 
@@ -147,13 +220,14 @@ def custom_matrix_profile(T, m, normalize=False):
 
 class ScampAnomalyDetector:
     """
-    Anomaly detection using SCAMP (or custom) matrix profile implementation.
+    Anomaly detection using SCAMP, STUMPY, or custom matrix profile implementation.
     
-    This class provides a unified interface for anomaly detection regardless of
-    whether PySCAMP is available or we need to use custom implementation.
+    This class provides a unified interface for anomaly detection with multiple
+    matrix profile backends and supports left matrix profile mode.
     """
     
-    def __init__(self, window_size=3, normalize=False, threshold_method='sigma'):
+    def __init__(self, window_size=3, normalize=False, threshold_method='sigma', 
+                 implementation='auto', use_left_mp=False):
         """
         Initialize the anomaly detector.
         
@@ -161,15 +235,39 @@ class ScampAnomalyDetector:
             window_size: Size of sliding window for pattern matching
             normalize: Whether to normalize matrix profile distances
             threshold_method: Method for determining anomaly threshold
+            implementation: Which implementation to use ('auto', 'pyscamp', 'stumpy', 'custom')
+            use_left_mp: Whether to use left matrix profile (only consider past data)
         """
         self.window_size = window_size
         self.normalize = normalize
         self.threshold_method = threshold_method
+        self.implementation = implementation
+        self.use_left_mp = use_left_mp
         self.mp_history = []
+        self._stumpy_stream = None
+        
+        # Validate implementation choice
+        if implementation == 'pyscamp' and not USE_PYSCAMP:
+            raise ValueError("PySCAMP not available. Choose 'stumpy', 'custom', or 'auto'")
+        if implementation == 'stumpy' and not USE_STUMPY:
+            raise ValueError("STUMPY not available. Choose 'pyscamp', 'custom', or 'auto'")
+    
+    def _select_implementation(self):
+        """Select the best available implementation."""
+        if self.implementation == 'auto':
+            if self.use_left_mp and USE_STUMPY:
+                return 'stumpy'
+            elif USE_PYSCAMP:
+                return 'pyscamp'
+            elif USE_STUMPY:
+                return 'stumpy'
+            else:
+                return 'custom'
+        return self.implementation
     
     def compute_matrix_profile(self, time_series):
         """
-        Compute matrix profile using available method (PySCAMP or custom).
+        Compute matrix profile using selected implementation.
         
         Args:
             time_series: Input time series data
@@ -177,15 +275,84 @@ class ScampAnomalyDetector:
         Returns:
             numpy.ndarray: Matrix profile distances
         """
-        if USE_PYSCAMP:
+        selected_impl = self._select_implementation()
+        
+        if selected_impl == 'pyscamp':
             return self._compute_with_pyscamp(time_series)
+        elif selected_impl == 'stumpy':
+            return self._compute_with_stumpy(time_series)
         else:
+            return self._compute_with_custom(time_series)
+    
+    def _compute_with_stumpy(self, time_series):
+        """Compute matrix profile using STUMPY."""
+        try:
+            print("🌟 Using STUMPY for matrix profile calculation...")
+            
+            # Prepare data for STUMPY
+            T = np.array(time_series, dtype=np.float64)
+            
+            # Handle NaN values by interpolating
+            if np.any(np.isnan(T)):
+                mask = np.isnan(T)
+                if np.all(mask):
+                    raise ValueError("All values are NaN")
+                T[mask] = np.interp(np.flatnonzero(mask), 
+                                  np.flatnonzero(~mask), T[~mask])
+            
+            if self.use_left_mp:
+                # Use streaming interface for left matrix profile
+                print("🔄 Computing left matrix profile with STUMPY streaming...")
+                
+                # Initialize stream with first portion of data
+                init_size = max(self.window_size * 2, min(100, len(T) // 2))
+                T_init = T[:init_size]
+                
+                self._stumpy_stream = stumpy.stumpi(T_init, self.window_size, 
+                                                  normalize=self.normalize, egress=False)
+                
+                # Stream remaining data
+                for i in range(init_size, len(T)):
+                    self._stumpy_stream.update(T[i])
+                
+                # Get left matrix profile
+                mp = self._stumpy_stream.left_P_[self.window_size:]
+                
+                print(f"✅ STUMPY left matrix profile computation complete: {len(mp)} profile points")
+            else:
+                # Use standard matrix profile
+                mp = stumpy.stump(T, self.window_size, normalize=self.normalize)[:, 0]
+                print(f"✅ STUMPY standard matrix profile computation complete: {len(mp)} profile points")
+            
+            return mp
+            
+        except AttributeError as e:
+            if 'NINF' in str(e):
+                print(f"⚠️  STUMPY NumPy 2.0 compatibility issue detected: {str(e)}")
+                print("💡 This is likely due to STUMPY using deprecated np.NINF. Consider updating STUMPY.")
+                print("🔄 Falling back to custom implementation...")
+            else:
+                print(f"⚠️  STUMPY attribute error: {str(e)}")
+                print("🔄 Falling back to custom implementation...")
+            return self._compute_with_custom(time_series)
+        except Exception as e:
+            error_msg = str(e)
+            if 'NINF' in error_msg:
+                print(f"⚠️  STUMPY NumPy 2.0 compatibility issue: {error_msg}")
+                print("💡 Solution: Update STUMPY to a NumPy 2.0 compatible version or downgrade NumPy to 1.x")
+            else:
+                print(f"⚠️  STUMPY failed: {error_msg}")
+            print("🔄 Falling back to custom implementation...")
             return self._compute_with_custom(time_series)
     
     def _compute_with_pyscamp(self, time_series):
         """Compute matrix profile using PySCAMP."""
         try:
             print("🚀 Using PySCAMP for matrix profile calculation...")
+            
+            if self.use_left_mp:
+                print("⚠️  PySCAMP doesn't support left matrix profile directly. Using custom implementation...")
+                return self._compute_with_custom(time_series)
             
             # Prepare data for PySCAMP
             T = np.array(time_series, dtype=np.float64)
@@ -209,8 +376,9 @@ class ScampAnomalyDetector:
     
     def _compute_with_custom(self, time_series):
         """Compute matrix profile using custom implementation."""
-        print("🛠️  Using custom matrix profile implementation...")
-        return custom_matrix_profile(time_series, self.window_size, self.normalize)
+        impl_type = "left matrix profile" if self.use_left_mp else "standard matrix profile"
+        print(f"🛠️  Using custom {impl_type} implementation...")
+        return custom_matrix_profile(time_series, self.window_size, self.normalize, self.use_left_mp)
     
     def calculate_threshold(self, matrix_profile, custom_multiplier=None):
         """
@@ -266,6 +434,11 @@ class ScampAnomalyDetector:
         else:
             values = np.array(data_series)
         
+        # Show configuration info
+        selected_impl = self._select_implementation()
+        mp_type = "left matrix profile" if self.use_left_mp else "standard matrix profile"
+        print(f"🔧 Configuration: {selected_impl.upper()} with {mp_type}")
+        
         # Compute matrix profile for entire series
         matrix_profile = self.compute_matrix_profile(values)
         threshold = self.calculate_threshold(matrix_profile, custom_multiplier)
@@ -281,6 +454,40 @@ class ScampAnomalyDetector:
                 anomaly_flags[i + self.window_size] = matrix_profile[i] > threshold
         
         return anomaly_flags, anomaly_scores, threshold
+    
+    def get_implementation_info(self):
+        """Get information about the current configuration."""
+        selected_impl = self._select_implementation()
+        available_libs = []
+        if USE_PYSCAMP:
+            available_libs.append("PySCAMP")
+        if USE_STUMPY:
+            available_libs.append("STUMPY")
+        available_libs.append("Custom")
+        
+        # Get compatibility information
+        compat_info = check_numpy_stumpy_compatibility()
+        
+        info = {
+            'selected_implementation': selected_impl,
+            'available_implementations': available_libs,
+            'use_left_mp': self.use_left_mp,
+            'window_size': self.window_size,
+            'normalize': self.normalize,
+            'threshold_method': self.threshold_method,
+            'numpy_version': compat_info['numpy_version'],
+            'numpy_2_compat': compat_info['compatibility_patches_applied']
+        }
+        
+        # Add STUMPY version if available
+        if USE_STUMPY and 'stumpy_version' in compat_info:
+            info['stumpy_version'] = compat_info['stumpy_version']
+        
+        # Add warnings if there are compatibility issues
+        if compat_info['recommendations']:
+            info['compatibility_warnings'] = compat_info['recommendations']
+        
+        return info
 
 class DataGenerator:
     """Generate synthetic MSS-like data for demonstration purposes."""

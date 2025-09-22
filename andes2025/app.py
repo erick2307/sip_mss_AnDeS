@@ -33,6 +33,63 @@ warnings.filterwarnings('ignore')
 sys.path.append(str(Path(__file__).parent))
 from core import LazyDatabase, ScampAnomalyDetector, DataGenerator
 
+# Define timezone for event dates
+from datetime import timezone
+
+# Event-based mesh codes for specific events
+events = [
+    {
+        'event_dt': datetime(2024,1,2,17,0,0,0,timezone.utc),
+        'meshcode' : 533937621,
+        'meshcodes': [533937614, 533937623, 533937624,
+                     533937612, 533937621, 533937622,
+                     533937514, 533937523, 533937524],
+        'event': 'Haneda Airport runway collision',
+        'merge': False,
+        'order': 4
+    },
+    {
+        'event_dt': datetime(2024,2,7,0,0,0,0,timezone.utc),
+        'meshcode' : 533946403,
+        'meshcodes': [533945592, 533946501, 533946502,
+                     533945494, 533946403, 533946404,
+                     533945492, 533946401, 533946402],
+        'event': 'Taylor Swift – The Eras Tour (Tokyo Dome)',
+        'merge': False,
+        'order': 4
+    },
+    {
+        'event_dt': datetime(2024,1,1,0,0,0,0,timezone.utc),
+        'meshcode' : 533946403,
+        'meshcodes': [533945592, 533946501, 533946502,
+                     533945494, 533946403, 533946404,
+                     533945492, 533946401, 533946402],
+        'event': 'Bruno Mars - (Tokyo Dome)',
+        'merge': False,
+        'order': 4
+    },
+    {
+        'event_dt': datetime(2024,8,11,10,0,0,0,timezone.utc),
+        'meshcode' : 533947534,
+        'meshcodes': [533947631, 533947632, 533947641,
+                     533947533, 533947534, 533947543,
+                     533947531, 533947532, 533947541],
+        'event': 'Comic Market 104 (Tokyo Big Sight)',
+        'merge': False,
+        'order': 4
+    },
+    {
+        'event_dt': datetime(2024,9,28,10,0,0,0,timezone.utc),
+        'meshcode' : 534041724,
+        'meshcodes': [534041821, 534041822, 534041831,
+                     534041723, 534041724, 534041733,
+                     534041721, 534041722, 534041731],
+        'event': 'Tokyo Game Show 2024 (Makuhari Messe)',
+        'merge': False,
+        'order': 4
+    }
+]
+
 # Set page configuration
 st.set_page_config(
     page_title="AnDeS - ANomaly DEtection System",
@@ -141,38 +198,37 @@ def update_metrics(processing_time: float, data_points: int, anomalies: int):
     st.session_state.detection_metrics['last_detection_time'] = datetime.now()
 
 @st.cache_data
+def get_available_events() -> List[dict]:
+    """Get available events with their mesh codes."""
+    return events
+
+@st.cache_data
 def get_available_mesh_ids() -> List[str]:
-    """Get available mesh IDs from the data files."""
+    """Get available mesh IDs from the predefined events."""
     mesh_ids = []
     
-    # Try to load actual mesh IDs from areas files
-    try:
-        # Check for recent years to get actual mesh IDs
-        for year in [2024, 2023, 2022]:
-            areas_file = Path.joinpath(DATA_DIR, f"ntt_mss_{year}_areas.npy")
-            if areas_file.exists():
-                mesh_id_mapping = np.load(areas_file)
-                # Convert int32 to strings and take a sample
-                actual_mesh_ids = [str(int(mesh_id)) for mesh_id in mesh_id_mapping[:20]]  # Take first 20
-                mesh_ids.extend(actual_mesh_ids)
-                logger.info(f"Loaded {len(actual_mesh_ids)} mesh IDs from {year} areas file")
-                break
+    # Extract all unique mesh codes from events
+    for event in events:
+        # Add main meshcode
+        if 'meshcode' in event:
+            mesh_ids.append(str(event['meshcode']))
         
-        # Remove duplicates and sort
-        if mesh_ids:
-            mesh_ids = sorted(list(set(mesh_ids)))
-        
-    except Exception as e:
-        logger.warning(f"Error loading mesh IDs from areas files: {e}")
+        # Add all meshcodes from the list
+        if 'meshcodes' in event:
+            mesh_ids.extend([str(code) for code in event['meshcodes']])
     
-    # Fallback to hardcoded mesh IDs if loading failed
-    if not mesh_ids:
-        logger.warning("Using fallback mesh IDs")
-        mesh_ids = ['563712311', '563712312', '563712321',
-                   '563712213', '563712214', '563712223',
-                   '563712211']
-
+    # Remove duplicates and sort
+    mesh_ids = sorted(list(set(mesh_ids)))
+    
+    logger.info(f"Loaded {len(mesh_ids)} unique mesh IDs from {len(events)} events")
     return mesh_ids
+
+def get_event_by_name(event_name: str) -> dict:
+    """Get event details by event name."""
+    for event in events:
+        if event['event'] == event_name:
+            return event
+    return None
 
 @st.cache_data
 def get_available_years() -> List[int]:
@@ -189,8 +245,76 @@ def get_available_years() -> List[int]:
     return sorted(list(set(years))) if years else list(range(2016, 2026))
 
 @st.cache_data
-def load_mss_data(year: int, mesh_id_list: List[str], multi_mesh_analysis: bool = False) -> pd.DataFrame:
-    """Load Mobile Spatial Statistics data for specified parameters.
+def get_available_date_range() -> Tuple[datetime, datetime]:
+    """Get the available date range from all data files."""
+    available_years = get_available_years()
+    if not available_years:
+        return datetime(2016, 1, 1), datetime(2025, 12, 31)
+    
+    # Return full range from first year to last year
+    start_date = datetime(min(available_years), 1, 1)
+    end_date = datetime(max(available_years), 12, 31)
+    return start_date, end_date
+
+@st.cache_data
+def load_mss_data_by_date_range(start_date: datetime.date, end_date: datetime.date, 
+                               mesh_id_list: List[str], multi_mesh_analysis: bool = False) -> pd.DataFrame:
+    """Load Mobile Spatial Statistics data for specified date range (can span multiple years).
+    
+    Args:
+        start_date: Start date for data loading
+        end_date: End date for data loading
+        mesh_id_list: List of mesh ID codes to extract
+        multi_mesh_analysis: If True, aggregate data from all mesh IDs; if False, use single mesh
+    
+    Returns:
+        DataFrame with columns: timestamp, population, mesh_id
+    """
+    start_time = time.time()
+    
+    try:
+        # Determine which years we need to load
+        years_to_load = list(range(start_date.year, end_date.year + 1))
+        log_message(f"Loading data for years: {years_to_load}", "info")
+        
+        all_dataframes = []
+        
+        for year in years_to_load:
+            # Load data for this year using the original function
+            year_df = load_mss_data_single_year(year, mesh_id_list, multi_mesh_analysis)
+            
+            if not year_df.empty:
+                # Filter to date range
+                year_start = max(datetime(year, 1, 1), datetime.combine(start_date, datetime.min.time()))
+                year_end = min(datetime(year, 12, 31, 23, 59, 59), datetime.combine(end_date, datetime.max.time()))
+                
+                mask = (year_df['timestamp'] >= year_start) & (year_df['timestamp'] <= year_end)
+                filtered_df = year_df[mask].copy()
+                
+                if not filtered_df.empty:
+                    all_dataframes.append(filtered_df)
+                    log_message(f"Added {len(filtered_df)} records from year {year}", "info")
+        
+        if not all_dataframes:
+            log_message("No data found for the specified date range", "error")
+            return pd.DataFrame()
+        
+        # Concatenate all dataframes
+        combined_df = pd.concat(all_dataframes, ignore_index=True)
+        combined_df = combined_df.sort_values('timestamp').reset_index(drop=True)
+        
+        processing_time = time.time() - start_time
+        log_message(f"Multi-year data loaded successfully: {len(combined_df)} records across {len(years_to_load)} years in {processing_time:.2f}s", "info")
+        
+        return combined_df
+        
+    except Exception as e:
+        log_message(f"Error loading multi-year data: {e}", "error")
+        return pd.DataFrame()
+
+@st.cache_data
+def load_mss_data_single_year(year: int, mesh_id_list: List[str], multi_mesh_analysis: bool = False) -> pd.DataFrame:
+    """Load Mobile Spatial Statistics data for a single year.
     
     Args:
         year: The year to load data for
@@ -301,14 +425,65 @@ class RealTimeAnomalyDetector:
     """Real-time anomaly detector using core SCAMP functionality."""
     
     def __init__(self):
-        self.scamp_detector = ScampAnomalyDetector()
+        self.scamp_detector = None
         self.lazy_db = LazyDatabase()
+        
+    def _get_detector(self, config):
+        """Get or create detector with current configuration."""
+        if (self.scamp_detector is None or 
+            getattr(self.scamp_detector, 'implementation', None) != config.get('implementation') or
+            getattr(self.scamp_detector, 'use_left_mp', None) != config.get('use_left_mp')):
+            
+            self.scamp_detector = ScampAnomalyDetector(
+                window_size=config.get('subsequence_length', 24),
+                normalize=config.get('normalize_matrix_profile', False),
+                threshold_method=config.get('threshold_method', 'sigma'),
+                implementation=config.get('implementation', 'auto'),
+                use_left_mp=config.get('use_left_mp', False)
+            )
+        else:
+            # Update parameters that can change without recreating detector
+            self.scamp_detector.window_size = config.get('subsequence_length', 24)
+            self.scamp_detector.normalize = config.get('normalize_matrix_profile', False)
+            self.scamp_detector.threshold_method = config.get('threshold_method', 'sigma')
+        
+        return self.scamp_detector
+    
+    def get_implementation_info(self):
+        """Get implementation information from the underlying detector."""
+        if self.scamp_detector is None:
+            # Return default info if no detector is initialized yet
+            available_libs = []
+            try:
+                import pyscamp
+                available_libs.append("PySCAMP")
+            except ImportError:
+                pass
+            try:
+                import stumpy
+                available_libs.append("STUMPY")
+            except ImportError:
+                pass
+            available_libs.append("Custom")
+            
+            return {
+                'selected_implementation': 'auto',
+                'available_implementations': available_libs,
+                'use_left_mp': False,
+                'window_size': 24,
+                'normalize': False,
+                'threshold_method': 'sigma'
+            }
+        else:
+            return self.scamp_detector.get_implementation_info()
         
     def detect_anomalies(self, data: pd.DataFrame, 
                         subsequence_length: int = 24,
                         threshold_method: str = 'sigma',
                         threshold_multiplier: float = None,
-                        normalize: bool = False) -> Tuple[np.ndarray, np.ndarray, float, float]:
+                        normalize: bool = False,
+                        implementation: str = 'auto',
+                        use_left_mp: bool = False) -> Tuple[np.ndarray, np.ndarray, float, float]:
         """Detect anomalies using the core SCAMP algorithm."""
         start_time = time.time()
         
@@ -321,13 +496,20 @@ class RealTimeAnomalyDetector:
             value_col = 'population' if 'population' in data.columns else 'value'
             values = data[value_col].values
             
-            # Configure SCAMP detector
-            self.scamp_detector.window_size = subsequence_length
-            self.scamp_detector.threshold_method = threshold_method
-            self.scamp_detector.normalize = normalize
+            # Create configuration dict
+            config = {
+                'subsequence_length': subsequence_length,
+                'threshold_method': threshold_method,
+                'normalize_matrix_profile': normalize,
+                'implementation': implementation,
+                'use_left_mp': use_left_mp
+            }
+            
+            # Get detector with current configuration
+            detector = self._get_detector(config)
             
             # Detect anomalies using core algorithm
-            anomalies, scores, threshold_used = self.scamp_detector.detect_anomalies_batch(
+            anomalies, scores, threshold_used = detector.detect_anomalies_batch(
                 values, custom_multiplier=threshold_multiplier
             )
             
@@ -337,8 +519,12 @@ class RealTimeAnomalyDetector:
             # Update metrics
             update_metrics(processing_time, len(data), anomaly_count)
             
+            # Log implementation info
+            impl_info = detector.get_implementation_info()
             log_message(
-                f"Anomaly detection complete: {anomaly_count} anomalies found in {processing_time:.2f}s using {threshold_method}",
+                f"Anomaly detection complete: {anomaly_count} anomalies found in {processing_time:.2f}s using "
+                f"{impl_info['selected_implementation'].upper()} with "
+                f"{'left' if impl_info['use_left_mp'] else 'standard'} matrix profile",
                 "info"
             )
             
@@ -378,28 +564,134 @@ def main():
     # Get available options
     available_years = get_available_years()
     available_mesh_ids = get_available_mesh_ids()
+    min_date, max_date = get_available_date_range()
     
-    # User inputs
-    selected_year = st.sidebar.selectbox("Select Year", available_years, index=len(available_years)-1)
-    selected_mesh = st.sidebar.selectbox("Select Mesh ID Range", available_mesh_ids)
+    # Date range selection
+    st.sidebar.write("**Data Date Range**")
+    col1, col2 = st.sidebar.columns(2)
     
-    # Custom mesh ID input
-    st.sidebar.subheader("🔢 Custom Mesh IDs")
-    custom_mesh_input = st.sidebar.text_area(
-        "Input Mesh ID Range", 
-        placeholder="Enter mesh IDs separated by commas\nExample: 563712311, 563712312, 563712321",
-        help="Enter one or more mesh ID codes separated by commas"
+    with col1:
+        start_date = st.date_input(
+            "Start Date",
+            value=min_date.date(),
+            min_value=min_date.date(),
+            max_value=max_date.date(),
+            help="Select the start date for data loading"
+        )
+    
+    with col2:
+        end_date = st.date_input(
+            "End Date", 
+            value=max_date.date(),
+            min_value=min_date.date(),
+            max_value=max_date.date(),
+            help="Select the end date for data loading"
+        )
+    
+    # Validate date range
+    if start_date > end_date:
+        st.sidebar.error("Start date must be before end date!")
+        start_date = end_date
+    
+    # Show selected range info
+    date_span = (end_date - start_date).days
+    years_span = list(range(start_date.year, end_date.year + 1))
+    st.sidebar.info(f"📅 **Selected Range:** {date_span + 1} days across {len(years_span)} year(s): {', '.join(map(str, years_span))}")
+    
+    # Event-based mesh ID selection
+    st.sidebar.subheader("🎯 Event Selection")
+    
+    # Get available events
+    available_events = get_available_events()
+    event_options = ["Custom Selection"] + [event['event'] for event in available_events]
+    
+    selected_event_name = st.sidebar.selectbox(
+        "Select Event",
+        options=event_options,
+        index=0,
+        help="Choose a predefined event or use custom selection"
     )
     
-    # Parse custom mesh IDs
-    if custom_mesh_input.strip():
-        mesh_id_list = [mesh.strip() for mesh in custom_mesh_input.split(',') if mesh.strip()]
-    else:
-        # Use selected mesh as single item list
-        mesh_id_list = [selected_mesh]
+    # Adjust dates for predefined events
+    if selected_event_name != "Custom Selection":
+        selected_event = get_event_by_name(selected_event_name)
+        if selected_event:
+            # Adjust start and end dates around the event date
+            event_date = selected_event['event_dt'].date()
+            # Set start date to one day before event
+            start_date = event_date - timedelta(days=1)
+            # Set end date to one day after event  
+            end_date = event_date + timedelta(days=1)
+            
+            # Ensure dates are within available range
+            min_date_obj, max_date_obj = get_available_date_range()
+            start_date = max(start_date, min_date_obj.date())
+            end_date = min(end_date, max_date_obj.date())
+            
+            # Update years span
+            years_span = list(range(start_date.year, end_date.year + 1))
+            
+            st.sidebar.info(f"📅 **Auto-adjusted Range:** {start_date} to {end_date} (event ± 1 day)")
     
-    multi_mesh_analysis = st.sidebar.checkbox("Multi-mesh analysis", value=False, 
-                                             help="Aggregate data from all provided mesh IDs")
+    # Handle event selection
+    if selected_event_name != "Custom Selection":
+        selected_event = get_event_by_name(selected_event_name)
+        if selected_event:
+            # Display event information
+            event_date = selected_event['event_dt'].strftime("%Y-%m-%d %H:%M")
+            st.sidebar.info(f"📅 **Event Date:** {event_date}")
+            st.sidebar.info(f"🏢 **Event:** {selected_event['event']}")
+            st.sidebar.info(f"📍 **Main Mesh:** {selected_event['meshcode']}")
+            st.sidebar.info(f"🗺️ **Total Meshes:** {len(selected_event['meshcodes'])}")
+            
+            # Use event mesh codes
+            mesh_id_list = [str(code) for code in selected_event['meshcodes']]
+            
+            # Option to use only main mesh or all meshes
+            use_all_meshes = st.sidebar.checkbox(
+                "Use all event meshes", 
+                value=True,
+                help="Use all mesh codes for this event or just the main one"
+            )
+            
+            if not use_all_meshes:
+                mesh_id_list = [str(selected_event['meshcode'])]
+                
+            # Show selected meshes
+            st.sidebar.write(f"**Selected Mesh IDs:** {', '.join(mesh_id_list[:3])}{'...' if len(mesh_id_list) > 3 else ''}")
+            
+            # For events, handle multi-mesh analysis logic
+            if use_all_meshes and len(mesh_id_list) > 1:
+                # Automatically enable multi-mesh analysis for multiple meshes
+                multi_mesh_analysis = True
+                st.sidebar.info("🔗 **Multi-mesh analysis automatically enabled** for event analysis")
+            else:
+                # Single mesh selected, no need for multi-mesh analysis
+                multi_mesh_analysis = False
+            
+    else:
+        # Custom mesh ID selection (fallback to original behavior)
+        available_mesh_ids = get_available_mesh_ids()
+        selected_mesh = st.sidebar.selectbox("Select Mesh ID Range", available_mesh_ids)
+        
+        # Custom mesh ID input
+        st.sidebar.subheader("🔢 Custom Mesh IDs")
+        custom_mesh_input = st.sidebar.text_area(
+            "Input Mesh ID Range", 
+            placeholder="Enter mesh IDs separated by commas\nExample: 533937621, 533946403, 533947534",
+            help="Enter one or more mesh ID codes separated by commas"
+        )
+        
+        # Parse custom mesh IDs
+        if custom_mesh_input.strip():
+            mesh_id_list = [mesh.strip() for mesh in custom_mesh_input.split(',') if mesh.strip()]
+        else:
+            # Use selected mesh as single item list
+            mesh_id_list = [selected_mesh]
+        
+        # Multi-mesh analysis option for custom selection
+        multi_mesh_analysis = st.sidebar.checkbox("Multi-mesh analysis", value=False, 
+                                                 help="Aggregate data from all provided mesh IDs")
     
     # Detection parameters
     st.sidebar.subheader("🔧 Detection Parameters")
@@ -431,15 +723,87 @@ def main():
     else:
         threshold_multiplier = None
     
+    # Matrix Profile Implementation Selection
+    st.sidebar.subheader("⚙️ Matrix Profile Implementation")
+    
+    # Get available implementations
+    detector = get_detector()
+    impl_info = detector.get_implementation_info()
+    available_impls = impl_info['available_implementations']
+    
+    # Create options with descriptions
+    impl_options = []
+    impl_descriptions = {
+        'auto': '🤖 Auto (Best Available)',
+        'pyscamp': '🚀 PySCAMP (GPU Accelerated)',
+        'stumpy': '🌟 STUMPY (Streaming Support)',
+        'custom': '🛠️ Custom (Pure Python)'
+    }
+    
+    for impl in ['auto', 'pyscamp', 'stumpy', 'custom']:
+        if impl == 'auto':
+            impl_options.append(impl_descriptions[impl])
+        elif impl.upper() in [lib.upper() for lib in available_impls]:
+            impl_options.append(impl_descriptions[impl])
+    
+    selected_impl_display = st.sidebar.selectbox(
+        "Matrix Profile Library",
+        options=impl_options,
+        index=0,
+        help="Choose which matrix profile implementation to use"
+    )
+    
+    # Extract actual implementation name
+    selected_implementation = selected_impl_display.split(' ')[1].lower()
+    
+    # Left Matrix Profile option
+    use_left_mp = st.sidebar.checkbox(
+        "Use Left Matrix Profile",
+        value=True,
+        help="Only consider past data for nearest neighbor search (prevents future data from updating past anomaly scores)"
+    )
+    
+    # Show info about left matrix profile
+    if use_left_mp:
+        st.sidebar.info("🔒 **Left Matrix Profile Mode**: Only uses historical data for anomaly detection. This prevents future data from changing past anomaly classifications.")
+    
+    # Show selected configuration summary
+    st.sidebar.subheader("📋 Configuration Summary")
+    
+    # Create mesh analysis description
+    if selected_event_name != "Custom Selection":
+        mesh_description = f"Event: {len(mesh_id_list)} meshes"
+        if multi_mesh_analysis:
+            mesh_description += " (aggregated)"
+        else:
+            mesh_description += " (single)"
+    else:
+        mesh_description = f"Custom: {len(mesh_id_list)} mesh{'es' if len(mesh_id_list) > 1 else ''}"
+        if multi_mesh_analysis and len(mesh_id_list) > 1:
+            mesh_description += " (aggregated)"
+    
+    config_summary = f"""
+    **Library:** {selected_impl_display.split(' ')[1]}
+    **Matrix Profile:** {'Left' if use_left_mp else 'Standard'}
+    **Window Size:** {subsequence_length} hours
+    **Threshold:** {threshold_method}
+    **Mesh Analysis:** {mesh_description}
+    """
+    st.sidebar.text(config_summary)
+    
     # Store configuration in session state
     st.session_state.config = {
-        'year': selected_year,
+        'start_date': start_date,
+        'end_date': end_date,
+        'years_span': years_span,
         'mesh_id_list': mesh_id_list,
         'multi_mesh_analysis': multi_mesh_analysis,
         'subsequence_length': subsequence_length,
         'threshold_method': threshold_method,
         'threshold_multiplier': threshold_multiplier,
-        'normalize_matrix_profile': normalize_matrix_profile
+        'normalize_matrix_profile': normalize_matrix_profile,
+        'implementation': selected_implementation,
+        'use_left_mp': use_left_mp
     }
     
     # Main content tabs
@@ -471,9 +835,10 @@ def real_time_analysis():
     # Load data
     if st.button("🔄 Load/Refresh Data"):
         with st.spinner("Loading MSS data..."):
-            log_message(f"Loading data for {config['year']} - {config['mesh_id_list']}")
-            data = load_mss_data(
-                year=config['year'],
+            log_message(f"Loading data for {config['start_date']} to {config['end_date']} - {config['mesh_id_list']}")
+            data = load_mss_data_by_date_range(
+                start_date=config['start_date'],
+                end_date=config['end_date'],
                 mesh_id_list=config['mesh_id_list'],
                 multi_mesh_analysis=config['multi_mesh_analysis']
             )
@@ -481,7 +846,19 @@ def real_time_analysis():
             if not data.empty:
                 st.session_state.current_data = data
                 st.session_state.data_loaded = True
-                log_message(f"Successfully loaded {len(data)} data points")
+                
+                # Enhanced success message with mesh information
+                mesh_info = ""
+                if config['multi_mesh_analysis'] and len(config['mesh_id_list']) > 1:
+                    mesh_info = f" from {len(config['mesh_id_list'])} aggregated meshes"
+                elif len(config['mesh_id_list']) > 1:
+                    mesh_info = f" from first of {len(config['mesh_id_list'])} meshes"
+                else:
+                    mesh_info = f" from mesh {config['mesh_id_list'][0]}"
+                
+                success_msg = f"Successfully loaded {len(data)} data points{mesh_info}"
+                log_message(success_msg)
+                st.success(success_msg)
             else:
                 st.error("Failed to load data. Check logs for details.")
                 return
@@ -610,7 +987,7 @@ def real_time_analysis():
     
     # Run detection
     if st.button("🔍 Run Anomaly Detection"):
-        with st.spinner("Running SCAMP anomaly detection..."):
+        with st.spinner("Running matrix profile anomaly detection..."):
             detector = get_detector()
             # Use filtered data for anomaly detection
             anomalies, scores, used_threshold, processing_time = detector.detect_anomalies(
@@ -618,7 +995,9 @@ def real_time_analysis():
                 subsequence_length=config['subsequence_length'],
                 threshold_method=config['threshold_method'],
                 threshold_multiplier=config['threshold_multiplier'],
-                normalize=config['normalize_matrix_profile']
+                normalize=config['normalize_matrix_profile'],
+                implementation=config.get('implementation', 'auto'),
+                use_left_mp=config.get('use_left_mp', False)
             )
             
             if len(anomalies) > 0:
@@ -649,7 +1028,9 @@ def real_time_analysis():
                 config['threshold_method'] != detection_config.get('threshold_method') or
                 config['threshold_multiplier'] != detection_config.get('threshold_multiplier') or
                 config['subsequence_length'] != detection_config.get('subsequence_length') or
-                config['normalize_matrix_profile'] != detection_config.get('normalize_matrix_profile')
+                config['normalize_matrix_profile'] != detection_config.get('normalize_matrix_profile') or
+                config.get('implementation') != detection_config.get('implementation') or
+                config.get('use_left_mp') != detection_config.get('use_left_mp')
             )
             
             if config_changed:
@@ -669,6 +1050,99 @@ def real_time_analysis():
         
         display_detection_results(st.session_state.detection_results)
     
+def create_anomaly_heatmap(data: pd.DataFrame):
+    """Create a heatmap visualization similar to the andes.ipynb reference code."""
+    try:
+        if data.empty or 'detected_anomaly' not in data.columns:
+            st.warning("No anomaly data available for heatmap")
+            return
+        
+        # Get anomaly data
+        data_copy = data.copy()
+        data_copy['hour'] = data_copy['timestamp'].dt.hour
+        data_copy['date'] = data_copy['timestamp'].dt.date
+        
+        # Create array for anomaly visualization (similar to the notebook code)
+        # Get unique dates and sort them
+        unique_dates = sorted(data_copy['date'].unique())
+        
+        if len(unique_dates) == 0:
+            st.warning("No date data available for heatmap")
+            return
+        
+        # Create a matrix: rows = days, columns = hours (0-23)
+        anomaly_matrix = np.zeros((len(unique_dates), 24))
+        
+        # Fill the matrix with anomaly data
+        for i, date in enumerate(unique_dates):
+            day_data = data_copy[data_copy['date'] == date]
+            for _, row in day_data.iterrows():
+                hour = row['hour']
+                if 0 <= hour <= 23:  # Valid hour range
+                    if row['detected_anomaly']:
+                        anomaly_matrix[i, hour] = 2  # Anomaly detected
+                    else:
+                        anomaly_matrix[i, hour] = 1  # Normal data
+        
+        # Create the matplotlib figure
+        fig, ax = plt.subplots(figsize=(12, max(6, len(unique_dates) * 0.3)))
+        
+        # Use CMRmap_r colormap like in the reference code
+        im = ax.imshow(anomaly_matrix, cmap='CMRmap_r', aspect=0.7, interpolation='nearest')
+        
+        # Set up y-axis (dates)
+        ax.set_yticks(np.arange(len(unique_dates)))
+        ax.set_yticklabels([f"{date}" for date in unique_dates])
+        
+        # Set up x-axis (hours)
+        ax.set_xticks(np.arange(24))
+        ax.set_xticklabels([f"{i:02d}" for i in range(24)], rotation=45)
+        
+        # Add grid lines like in the reference code
+        # Vertical lines at 0.5 of each hour
+        for i in range(1, 24):
+            ax.axvline(i-0.5, color='black', linewidth=0.3)
+        
+        # Horizontal lines at 0.5 of each day
+        for i in range(1, len(unique_dates)):
+            ax.axhline(i-0.5, color='black', linewidth=0.3)
+        
+        # Labels and title
+        ax.set_xlabel("Hour Frame of the day (e.g. 08 means 08:00 to 08:59)")
+        ax.set_ylabel("Date")
+        
+        # Create title with mesh info if available
+        mesh_info = ""
+        if 'mesh_id' in data.columns and not data['mesh_id'].empty:
+            mesh_id = data['mesh_id'].iloc[0]
+            mesh_info = f" - Mesh ID: {mesh_id}"
+        
+        date_range = f"{unique_dates[0]} to {unique_dates[-1]}"
+        ax.set_title(f"Anomaly Detection Heatmap{mesh_info}\n{date_range}")
+        
+        # Add colorbar with labels
+        cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+        cbar.set_ticks([0, 1, 2])
+        cbar.set_ticklabels(['No Data', 'Normal', 'Anomaly'])
+        
+        # Adjust layout to prevent label cutoff
+        plt.tight_layout()
+        
+        # Display in Streamlit
+        st.pyplot(fig)
+        plt.close(fig)  # Clean up to avoid memory leaks
+        
+        # Display summary statistics
+        total_hours = np.sum(anomaly_matrix > 0)
+        anomaly_hours = np.sum(anomaly_matrix == 2)
+        if total_hours > 0:
+            anomaly_rate = (anomaly_hours / total_hours) * 100
+            st.info(f"📊 **Heatmap Summary:** {anomaly_hours} anomaly hours out of {total_hours} total hours ({anomaly_rate:.1f}% anomaly rate)")
+        
+    except Exception as e:
+        st.error(f"Error creating heatmap: {e}")
+        st.write("Debug info:", str(e))
+
 def display_detection_results(data: pd.DataFrame):
     """Display anomaly detection results."""
     if data.empty:
@@ -774,14 +1248,31 @@ def display_detection_results(data: pd.DataFrame):
     
     # Anomaly details
     if total_anomalies > 0:
+        # Add heatmap visualization before anomaly details
+        st.subheader("🗓️ Anomaly Heatmap")
+        create_anomaly_heatmap(data)
+        
         st.subheader("🔍 Anomaly Details")
         anomaly_details = data[data['detected_anomaly']].copy()
         anomaly_details = anomaly_details.sort_values('timestamp', ascending=True)
         
-        # Display top anomalies
+        # Add options for table display
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**Total anomalies found:** {len(anomaly_details)}")
+        with col2:
+            table_height = st.selectbox(
+                "Table Height",
+                [200, 300, 400, 500, 600],
+                index=1,
+                help="Select table height for scrolling"
+            )
+        
+        # Display all anomalies in a scrollable table
         st.dataframe(
-            anomaly_details[['timestamp', value_col, 'anomaly_score']].head(10),
-            width="stretch"
+            anomaly_details[['timestamp', value_col, 'anomaly_score']],
+            width="stretch",
+            height=table_height
         )
         
         # Download option
@@ -1044,6 +1535,75 @@ def system_status():
         st.markdown(f'<div class="alert-green">{viz_status}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="alert-{"green" if "Recently Active" in process_status else "orange"}">{process_status}</div>', unsafe_allow_html=True)
     
+    # Library Compatibility Status
+    st.subheader("🔧 Library Compatibility Status")
+    
+    # Get implementation info
+    detector = get_detector()
+    impl_info = detector.get_implementation_info()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**📦 NumPy Status**")
+        numpy_version = impl_info.get('numpy_version', 'unknown')
+        numpy_major = int(numpy_version.split('.')[0]) if numpy_version != 'unknown' else 0
+        
+        version_status = f"NumPy {numpy_version}"
+        if numpy_major >= 2:
+            numpy_2_compat = impl_info.get('numpy_2_compat', False)
+            if numpy_2_compat:
+                compat_status = "✅ NumPy 2.0 Compatibility: Applied"
+                st.markdown(f'<div class="alert-green">{version_status}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="alert-green">{compat_status}</div>', unsafe_allow_html=True)
+            else:
+                compat_status = "⚠️ NumPy 2.0 Compatibility: Check Required"
+                st.markdown(f'<div class="alert-orange">{version_status}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="alert-orange">{compat_status}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="alert-green">{version_status}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="alert-green">✅ NumPy 1.x: Fully Compatible</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**🌟 STUMPY Status**")
+        available_impls = impl_info.get('available_implementations', [])
+        if 'STUMPY' in available_impls:
+            stumpy_version = impl_info.get('stumpy_version', 'unknown')
+            stumpy_status = f"✅ STUMPY {stumpy_version}: Available"
+            st.markdown(f'<div class="alert-green">{stumpy_status}</div>', unsafe_allow_html=True)
+            
+            # Check for compatibility warnings
+            warnings = impl_info.get('compatibility_warnings', [])
+            if warnings:
+                st.markdown('<div class="alert-orange">⚠️ Compatibility Issues Detected</div>', unsafe_allow_html=True)
+                for warning in warnings:
+                    st.caption(f"• {warning}")
+            else:
+                st.markdown('<div class="alert-green">✅ No Compatibility Issues</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="alert-red">❌ STUMPY: Not Available</div>', unsafe_allow_html=True)
+            st.markdown('<div class="alert-orange">⚠️ Left Matrix Profile: Limited</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("**🚀 Active Implementation**")
+        selected_impl = impl_info.get('selected_implementation', 'unknown')
+        use_left_mp = impl_info.get('use_left_mp', False)
+        window_size = impl_info.get('window_size', 0)
+        
+        impl_display = {
+            'auto': '🤖 Auto Selection',
+            'pyscamp': '🚀 PySCAMP',
+            'stumpy': '🌟 STUMPY', 
+            'custom': '🛠️ Custom'
+        }.get(selected_impl, f'❓ {selected_impl}')
+        
+        st.markdown(f'<div class="alert-green">{impl_display}</div>', unsafe_allow_html=True)
+        
+        mp_type = "🔒 Left Matrix Profile" if use_left_mp else "📊 Standard Matrix Profile"
+        st.markdown(f'<div class="alert-green">{mp_type}</div>', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="alert-green">⚙️ Window Size: {window_size}</div>', unsafe_allow_html=True)
+    
     # Real performance metrics with live updates
     st.subheader("📊 Live Performance Metrics")
     
@@ -1144,13 +1704,21 @@ def system_status():
             else:
                 configured_mesh_info = f"{mesh_count} mesh IDs"
         
+        # Get date range info
+        date_range_info = "Not configured"
+        if config.get('start_date') and config.get('end_date'):
+            date_span = (config['end_date'] - config['start_date']).days + 1
+            years_span = config.get('years_span', [])
+            date_range_info = f"{config['start_date']} to {config['end_date']} ({date_span} days, {len(years_span)} years)"
+        
         config_data = pd.DataFrame({
             'Parameter': [
                 'Subsequence Length', 
                 'Threshold Method', 
                 'Threshold Multiplier',
                 'Normalize Matrix Profile',
-                'Available Years', 
+                'Available Data Range', 
+                'Selected Date Range',
                 'Configured Mesh IDs',
                 'Loaded Data',
                 'Last Detection',
@@ -1161,7 +1729,8 @@ def system_status():
                 config.get('threshold_method', 'Not set'),
                 f"{config.get('threshold_multiplier', 'Auto')}" if config.get('threshold_multiplier') else 'Auto',
                 f"{config.get('normalize_matrix_profile', False)}",
-                f"{len(get_available_years())} years",
+                f"{min(get_available_years())}-{max(get_available_years())} ({len(get_available_years())} years)",
+                date_range_info,
                 configured_mesh_info,
                 current_data_info,
                 detection_info,
@@ -1237,8 +1806,9 @@ def documentation():
     ### 🎯 Key Features
     
     - **Real-time Anomaly Detection**: Interactive analysis with customizable parameters
-    - **Matrix Profile Analysis**: SCAMP algorithm for advanced pattern matching
-    - **Interactive Visualization**: Rich Plotly charts with anomaly overlays
+    - **Multiple Matrix Profile Implementations**: Choose between PySCAMP, STUMPY, or custom implementation
+    - **Left Matrix Profile Mode**: Option to only consider past data for anomaly detection
+    - **Interactive Visualization**: Rich Plotly charts with anomaly overlays and heatmaps
     - **Historical Analysis**: Deep dive into historical patterns with date range filtering
     - **Multi-mesh Analysis**: Support for single or aggregated mesh analysis
     - **Live System Monitoring**: Real-time performance metrics and system status
@@ -1246,12 +1816,31 @@ def documentation():
     
     ### 🔬 Algorithm Overview
     
-    AnDeS uses the **SCAMP (Scalable Matrix Profile)** algorithm to detect anomalies:
+    AnDeS uses **Matrix Profile** algorithms to detect anomalies with multiple implementation options:
     
+    **Available Implementations:**
+    - **🚀 PySCAMP**: GPU-accelerated matrix profile computation for large datasets
+    - **🌟 STUMPY**: Streaming support with left matrix profile capabilities
+    - **🛠️ Custom**: Pure Python implementation for maximum compatibility
+    
+    **Matrix Profile Types:**
+    - **Standard Matrix Profile**: Considers all data for finding nearest neighbors
+    - **Left Matrix Profile**: Only uses historical data (prevents future hindsight)
+    
+    **Detection Process:**
     1. **Data Preprocessing**: Load and filter MSS data by date range and mesh IDs
-    2. **Matrix Profile Computation**: Calculate similarity between subsequences using PySCAMP or custom implementation
+    2. **Matrix Profile Computation**: Calculate similarity between subsequences
     3. **Threshold Detection**: Apply configurable thresholds (δ×σ, percentile95, percentile99)
     4. **Anomaly Classification**: Flag unusual patterns for investigation and visualization
+    
+    ### 💡 Left Matrix Profile Explained
+    
+    The **Left Matrix Profile** option addresses a key consideration in anomaly detection:
+    
+    - **Standard Mode**: Uses all available data to find nearest neighbors, which means future data can update past anomaly scores
+    - **Left Matrix Profile Mode**: Only considers past data when finding nearest neighbors, ensuring that once an anomaly is detected, future data won't change that classification
+    
+    This is particularly useful for real-time scenarios where you want consistent historical anomaly detection that doesn't change as new data arrives.
     
     ### 📊 Data Sources
     
@@ -1263,9 +1852,11 @@ def documentation():
     ### 🚀 Getting Started
     
     #### Step 1: Configure Data Source
-    1. Select year from available data (2016-2025)
-    2. Choose mesh ID from dropdown or enter custom mesh IDs (comma-separated)
-    3. Enable "Multi-mesh analysis" to aggregate data from multiple mesh IDs
+    1. **Select Date Range**: Choose start and end dates (can span multiple years from 2016-2025)
+    2. **Choose Mesh ID**: Select from dropdown or enter custom mesh IDs (comma-separated)
+    3. **Multi-mesh Analysis**: Enable to aggregate data from multiple mesh IDs
+    
+    **New Feature**: Multi-year analysis support! You can now select date ranges that span across multiple years for comprehensive long-term anomaly detection.
     
     #### Step 2: Set Detection Parameters
     1. **Subsequence Length**: 3-24 hours (default: 24)
@@ -1290,10 +1881,19 @@ def documentation():
     - **Normalize Matrix Profile**: Whether to normalize distances by subsequence length
     
     #### Data Configuration
-    - **Year Selection**: Choose from available data years
-    - **Mesh ID Range**: Single or multiple mesh regions
-    - **Multi-mesh Analysis**: Aggregate multiple mesh regions
-    - **Date Range**: Filter analysis to specific time periods
+    - **Date Range Selection**: Choose start and end dates (supports multi-year ranges)
+    - **Event Selection**: Choose from predefined major events with pre-configured mesh codes
+    - **Event-based Mesh IDs**: Automatic mesh code selection based on event location
+    - **Custom Mesh Selection**: Manual mesh ID input for custom analysis areas
+    - **Multi-mesh Analysis**: Aggregate multiple mesh regions or use main event mesh only
+    - **Date Range Filtering**: Analysis can span across multiple years of data
+    
+    #### Available Events
+    - **Haneda Airport runway collision** (Jan 2, 2024) - 9 mesh codes around Tokyo Haneda
+    - **Taylor Swift – The Eras Tour (Tokyo Dome)** (Feb 7, 2024) - 9 mesh codes around Tokyo Dome
+    - **Bruno Mars - (Tokyo Dome)** (Jan 1, 2024) - 9 mesh codes around Tokyo Dome
+    - **Comic Market 104 (Tokyo Big Sight)** (Aug 11, 2024) - 9 mesh codes around Tokyo Big Sight
+    - **Tokyo Game Show 2024 (Makuhari Messe)** (Sep 28, 2024) - 9 mesh codes around Makuhari Messe
     
     ### 📈 Interface Tabs
     
@@ -1362,6 +1962,9 @@ def documentation():
     
     ### 🔄 Recent Updates (v2025.1.0)
     
+    - ✅ **Event-based Mesh Selection**: Added predefined major events with pre-configured mesh codes
+    - ✅ **NumPy 2.0 Compatibility**: Automatic fixes for STUMPY library compatibility issues
+    - ✅ Enhanced library compatibility monitoring in System Status
     - ✅ Simplified threshold configuration to δ×σ format
     - ✅ Enhanced date range filtering and consistency
     - ✅ Live system status monitoring with auto-refresh
@@ -1372,6 +1975,49 @@ def documentation():
     ### 📞 Support
 
     For technical support or questions about AnDeS, please contact the development team.
+    
+    ### 🔧 Troubleshooting
+    
+    #### NumPy 2.0 Compatibility Issues
+    
+    **Problem**: Error message about `np.NINF` being removed in NumPy 2.0
+    
+    **Solution**: The system automatically handles this compatibility issue by:
+    - ✅ Applying compatibility patches for STUMPY library
+    - ✅ Detecting NumPy 2.0 and missing deprecated constants
+    - ✅ Falling back to custom implementation if needed
+    - ✅ Showing compatibility status in System Status tab
+    
+    **Manual Fix** (if automatic fix fails):
+    ```bash
+    # Option 1: Update STUMPY to NumPy 2.0 compatible version
+    pip install --upgrade stumpy
+    
+    # Option 2: Use NumPy 1.x
+    pip install "numpy<2.0"
+    ```
+    
+    #### Common Issues
+    
+    **Data Loading Failures**:
+    - Check data file paths in DATA_DIR
+    - Verify .npy files exist for selected years
+    - Ensure mesh IDs match those in areas files
+    
+    **Detection Not Running**:
+    - Load data first using "Load/Refresh Data" button
+    - Check that subsequence length < data length
+    - Verify date range contains valid data
+    
+    **Performance Issues**:
+    - Monitor memory usage in System Status tab
+    - Reduce date range for large datasets
+    - Use PySCAMP for GPU acceleration if available
+    
+    **STUMPY Import Errors**:
+    - Check System Status tab for compatibility info
+    - Install STUMPY: `pip install stumpy`
+    - System will fallback to custom implementation
     """)
     
     # Credits

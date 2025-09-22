@@ -22,6 +22,7 @@ tqdm>=4.65.0
 
 # Optional - Enhanced Matrix Profile (install if available)
 # PySCAMP>=0.7.0
+stumpy>=1.12.0
 
 # Data Validation
 pydantic>=2.0.0
