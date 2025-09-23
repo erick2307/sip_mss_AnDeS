@@ -323,6 +323,239 @@ def get_available_date_range() -> Tuple[datetime, datetime]:
     return start_date, end_date
 
 @st.cache_data
+def load_mss_data_monthly_timeseries(event_datetime: datetime, 
+                                    mesh_id_list: List[str], 
+                                    multi_mesh_analysis: bool = False,
+                                    years_back: int = None,
+                                    is_actual_event: bool = False,
+                                    is_predefined_event: bool = False) -> pd.DataFrame:
+    """Load Mobile Spatial Statistics data using the new monthly time series logic.
+    
+    This function:
+    1. Takes the event datetime from the user
+    2. For custom analysis: Searches in each year from (event_year - years_back) to the event year
+       and extracts exactly one month of data from one month before until the event date/time in each year
+    3. For predefined events: Extracts one month before + one week after the event date/time for better analysis
+    4. For actual events: Extracts one month of data from one month before the actual event date
+    5. Concatenates all monthly periods into one time series
+    
+    Args:
+        event_datetime: The datetime of the event of interest
+        mesh_id_list: List of mesh ID codes to extract
+        multi_mesh_analysis: If True, aggregate data from all mesh IDs; if False, use single mesh
+        years_back: Number of years back from event year to include (if None, defaults to all available from 2016)
+        is_actual_event: If True, treats this as a specific event and extracts data around the actual event date only
+        is_predefined_event: If True, extends the extraction period to include one week after the event date
+    
+    Returns:
+        DataFrame with columns: timestamp, population, mesh_id, year_source
+    """
+    start_time = time.time()
+    
+    try:
+        # event_datetime should already be timezone-naive from the UI processing
+        # Calculate which years to analyze
+        end_year = event_datetime.year
+        
+        if years_back is None:
+            # Default behavior: from 2016 to event year
+            start_year = 2016
+        else:
+            # User-specified years back
+            start_year = max(2016, end_year - years_back + 1)  # Ensure we don't go before 2016
+        
+        # Validate that we have data available
+        if start_year > end_year:
+            log_message(f"Invalid year range: start_year {start_year} > end_year {end_year}", "error")
+            return pd.DataFrame()
+        
+        years_to_load = list(range(start_year, end_year + 1))
+        
+        log_message(f"Loading monthly time series for {len(years_to_load)} years: {years_to_load}", "info")
+        log_message(f"Event reference: {event_datetime.strftime('%Y-%m-%d %H:%M')}", "info")
+        if years_back is not None:
+            log_message(f"User specified {years_back} years back from {end_year}", "info")
+        if is_actual_event:
+            log_message("Processing as actual event - extracting data around the specific event date only", "info")
+        
+        all_dataframes = []
+        
+        if is_actual_event:
+            # For actual events, extract data only around the actual event date
+            # Calculate one month before the actual event date
+            event_year = event_datetime.year
+            
+            if event_datetime.month == 1:
+                # Handle January case - go to December of previous year
+                # Check if previous year data is available
+                if event_year - 1 < 2016:
+                    log_message(f"Skipping actual event extraction - January {event_year} event requires {event_year-1} data which is not available", "warning")
+                    return pd.DataFrame()
+                month_before = event_datetime.replace(year=event_year-1, month=12)
+            else:
+                # Normal case - subtract one month
+                try:
+                    month_before = event_datetime.replace(month=event_datetime.month - 1)
+                except ValueError:
+                    # Handle case where day doesn't exist in target month (e.g., Jan 31 -> Feb 31)
+                    if event_datetime.month == 3:  # March to February
+                        # Use last day of February
+                        import calendar
+                        last_day = calendar.monthrange(event_year, 2)[1]
+                        month_before = event_datetime.replace(month=2, day=min(event_datetime.day, last_day))
+                    else:
+                        # For other months, use day 1 as fallback
+                        month_before = event_datetime.replace(month=event_datetime.month - 1, day=1)
+            
+            # Define the one-month extraction period (from one month before TO the event date)
+            period_start = month_before
+            period_end = event_datetime
+            
+            log_message(f"Actual event extraction: {period_start.strftime('%Y-%m-%d %H:%M')} to {period_end.strftime('%Y-%m-%d %H:%M')}", "info")
+            
+            # Load data for the event year only
+            event_df = load_mss_data_single_year(event_year, mesh_id_list, multi_mesh_analysis)
+            
+            # If January event and we need December data from previous year, also load that
+            if event_datetime.month == 1 and event_year - 1 >= 2016:
+                prev_year_df = load_mss_data_single_year(event_year - 1, mesh_id_list, multi_mesh_analysis)
+                if not prev_year_df.empty:
+                    event_df = pd.concat([prev_year_df, event_df], ignore_index=True)
+            
+            if not event_df.empty:
+                if 'timestamp' in event_df.columns:
+                    # Convert period_start and period_end to pandas Timestamp objects for proper comparison
+                    period_start_ts = pd.Timestamp(period_start)
+                    period_end_ts = pd.Timestamp(period_end)
+                    
+                    # Filter to the monthly period
+                    mask = (event_df['timestamp'] >= period_start_ts) & (event_df['timestamp'] <= period_end_ts)
+                    filtered_df = event_df[mask].copy()
+                    
+                    if not filtered_df.empty:
+                        # Add year source information for tracking
+                        filtered_df['year_source'] = event_year
+                        all_dataframes.append(filtered_df)
+                        log_message(f"Added {len(filtered_df)} records for actual event period", "info")
+                    else:
+                        log_message(f"No data found for actual event period", "warning")
+                else:
+                    log_message(f"No timestamp column found in event year data", "warning")
+            else:
+                log_message(f"No data available for event year {event_year}", "warning")
+                
+        else:
+            # Original logic for custom analysis - multiple years with same month/day pattern
+            for year in years_to_load:
+                # For each year, calculate the one-month period from one month before to the event date
+                # Create the reference date for this year (the event date in this year)
+                try:
+                    year_event_date = event_datetime.replace(year=year)
+                except ValueError:
+                    # Handle leap year case (Feb 29)
+                    if event_datetime.month == 2 and event_datetime.day == 29:
+                        year_event_date = event_datetime.replace(year=year, day=28)
+                    else:
+                        log_message(f"Error creating reference date for year {year}, skipping", "warning")
+                        continue
+                
+                # Calculate one month before the event date
+                if year_event_date.month == 1:
+                    # Handle January case - go to December of previous year
+                    # Special case: for January 2016, skip because 2015 data is not available
+                    if year == 2016:
+                        log_message(f"Skipping year {year} - January 2016 event requires 2015 data which is not available", "warning")
+                        continue
+                    month_before = year_event_date.replace(year=year-1, month=12)
+                else:
+                    # Normal case - subtract one month
+                    try:
+                        month_before = year_event_date.replace(month=year_event_date.month - 1)
+                    except ValueError:
+                        # Handle case where day doesn't exist in target month (e.g., Jan 31 -> Feb 31)
+                        if year_event_date.month == 3:  # March to February
+                            # Use last day of February
+                            import calendar
+                            last_day = calendar.monthrange(year, 2)[1]
+                            month_before = year_event_date.replace(month=2, day=min(year_event_date.day, last_day))
+                        else:
+                            # For other months, use day 1 as fallback
+                            month_before = year_event_date.replace(month=year_event_date.month - 1, day=1)
+                
+                # Define the extraction period (from one month before TO the event date, plus one week for predefined events)
+                period_start = month_before
+                period_end = year_event_date
+                
+                # For predefined events, extend the period by one week after the event date
+                if is_predefined_event:
+                    from datetime import timedelta
+                    period_end = year_event_date + timedelta(weeks=1)
+                    log_message(f"Predefined event: extending extraction period by 1 week to {period_end.strftime('%Y-%m-%d %H:%M')}", "info")
+                
+                log_message(f"Year {year}: Extracting {period_start.strftime('%Y-%m-%d %H:%M')} to {period_end.strftime('%Y-%m-%d %H:%M')}", "info")
+                
+                # Handle cross-year periods (e.g., January events need December data from previous year, or extended periods into next year)
+                years_to_load_for_period = [year]
+                if period_start.year != period_end.year:
+                    # Cross-year period: need to load all years between start and end
+                    all_years_needed = list(range(period_start.year, period_end.year + 1))
+                    years_to_load_for_period = all_years_needed
+                    log_message(f"Cross-year period detected: loading data from years {years_to_load_for_period}", "info")
+                
+                # Load data for all required years for this period
+                period_dataframes = []
+                for load_year in years_to_load_for_period:
+                    year_df = load_mss_data_single_year(load_year, mesh_id_list, multi_mesh_analysis)
+                    if not year_df.empty:
+                        period_dataframes.append(year_df)
+                
+                # Combine data from all required years
+                if period_dataframes:
+                    combined_year_df = pd.concat(period_dataframes, ignore_index=True)
+                    
+                    if 'timestamp' in combined_year_df.columns:
+                        # Convert period_start and period_end to pandas Timestamp objects for proper comparison
+                        period_start_ts = pd.Timestamp(period_start)
+                        period_end_ts = pd.Timestamp(period_end)
+                        
+                        # Filter to the monthly period
+                        mask = (combined_year_df['timestamp'] >= period_start_ts) & (combined_year_df['timestamp'] <= period_end_ts)
+                        filtered_df = combined_year_df[mask].copy()
+                        
+                        if not filtered_df.empty:
+                            # Add year source information for tracking
+                            filtered_df['year_source'] = year
+                            all_dataframes.append(filtered_df)
+                            log_message(f"Added {len(filtered_df)} records from year {year} monthly period (cross-year: {len(period_dataframes)} data files)", "info")
+                        else:
+                            log_message(f"No data found for year {year} in the specified monthly period", "warning")
+                    else:
+                        log_message(f"No timestamp column found in combined year data", "warning")
+                else:
+                    log_message(f"No data available for required years {years_to_load_for_period}", "warning")
+        
+        if not all_dataframes:
+            log_message("No data found for any of the specified monthly periods", "error")
+            return pd.DataFrame()
+        
+        # Concatenate all monthly dataframes
+        combined_df = pd.concat(all_dataframes, ignore_index=True)
+        combined_df = combined_df.sort_values('timestamp').reset_index(drop=True)
+        
+        processing_time = time.time() - start_time
+        total_records = len(combined_df)
+        years_with_data = combined_df['year_source'].nunique()
+        
+        log_message(f"Monthly time series loaded successfully: {total_records} records from {years_with_data} years in {processing_time:.2f}s", "info")
+        log_message(f"Time series spans: {combined_df['timestamp'].min()} to {combined_df['timestamp'].max()}", "info")
+        
+        return combined_df
+        
+    except Exception as e:
+        log_message(f"Error loading monthly time series data: {e}", "error")
+        return pd.DataFrame()
+
+@st.cache_data
 def load_mss_data_by_date_range(start_date: datetime.date, end_date: datetime.date, 
                                mesh_id_list: List[str], multi_mesh_analysis: bool = False) -> pd.DataFrame:
     """Load Mobile Spatial Statistics data for specified date range (can span multiple years).
@@ -651,37 +884,58 @@ def main():
     available_mesh_ids = get_available_mesh_ids()
     min_date, max_date = get_available_date_range()
     
-    # Date range selection
-    st.sidebar.write("**Data Date Range**")
+    # Event Date and Time Selection (New Logic)
+    st.sidebar.write("**Event Date & Time**")
     col1, col2 = st.sidebar.columns(2)
     
     with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=min_date.date(),
-            min_value=min_date.date(),
-            max_value=max_date.date(),
-            help="Select the start date for data loading"
+        event_date = st.date_input(
+            "Event Date",
+            value=datetime(2024, 1, 1).date(),
+            min_value=datetime(2016, 1, 1).date(),
+            max_value=datetime.now().date(),
+            help="Select the date of the event of interest"
         )
     
     with col2:
-        end_date = st.date_input(
-            "End Date", 
-            value=max_date.date(),
-            min_value=min_date.date(),
-            max_value=max_date.date(),
-            help="Select the end date for data loading"
+        event_time = st.time_input(
+            "Event Time",
+            value=datetime.now().time().replace(second=0, microsecond=0),
+            help="Select the time of the event of interest"
         )
     
-    # Validate date range
-    if start_date > end_date:
-        st.sidebar.error("Start date must be before end date!")
-        start_date = end_date
+    # Combine date and time (always create timezone-naive datetime for consistency)
+    event_datetime = datetime.combine(event_date, event_time)
     
-    # Show selected range info
-    date_span = (end_date - start_date).days
-    years_span = list(range(start_date.year, end_date.year + 1))
-    st.sidebar.info(f"📅 **Selected Range:** {date_span + 1} days across {len(years_span)} year(s): {', '.join(map(str, years_span))}")
+    # User control for years back
+    st.sidebar.subheader("📅 Data Period Selection")
+    
+    # Calculate available years range
+    max_available_years = event_datetime.year - 2016 + 1
+    
+    years_back_option = st.sidebar.radio(
+        "Data extraction period:",
+        options=["All available years (2016 onwards)", "Custom years back"],
+        help="Choose how many years of data to include in the analysis"
+    )
+    
+    if years_back_option == "Custom years back":
+        years_back = st.sidebar.slider(
+            "Years back from event year:",
+            min_value=1,
+            max_value=max_available_years,
+            value=min(5, max_available_years),  # Default to 5 years or max available
+            help=f"Number of years back from {event_datetime.year} to include (limited by available data since 2016)"
+        )
+        start_year_display = max(2016, event_datetime.year - years_back + 1)
+        analysis_years = list(range(start_year_display, event_datetime.year + 1))
+    else:
+        years_back = None  # Use all available years
+        analysis_years = list(range(2016, event_datetime.year + 1))
+    
+    # Show analysis info
+    st.sidebar.info(f"📅 **Event DateTime:** {event_datetime.strftime('%Y-%m-%d %H:%M')}")
+    st.sidebar.info(f"📊 **Analysis:** 1-month periods from {len(analysis_years)} years ({min(analysis_years)}-{max(analysis_years)})")
     
     # Event-based mesh ID selection
     st.sidebar.subheader("🎯 Event Selection")
@@ -697,26 +951,28 @@ def main():
         help="Choose a predefined event or use custom selection"
     )
     
+    # Show different period info based on selection type
+    if selected_event_name != "Custom Selection":
+        st.sidebar.info(f"🔍 **Monthly Period:** 1 month before + 1 week after event date/time each year")
+    else:
+        st.sidebar.info(f"🔍 **Monthly Period:** 1 month before until event date/time each year")
+    
     # Adjust dates for predefined events
     if selected_event_name != "Custom Selection":
         selected_event = get_event_by_name(selected_event_name)
         if selected_event:
-            # Adjust start and end dates around the event date
-            event_date = selected_event['event_dt'].date()
-            # Set start date to one day before event
-            start_date = event_date - timedelta(days=1)
-            # Set end date to one day after event  
-            end_date = event_date + timedelta(days=1)
+            # Use predefined event date and time (convert to timezone-naive for consistency)
+            event_datetime_raw = selected_event['event_dt']
+            if hasattr(event_datetime_raw, 'tzinfo') and event_datetime_raw.tzinfo is not None:
+                event_datetime = event_datetime_raw.replace(tzinfo=None)
+            else:
+                event_datetime = event_datetime_raw
+            event_date = event_datetime.date()
+            event_time = event_datetime.time()
             
-            # Ensure dates are within available range
-            min_date_obj, max_date_obj = get_available_date_range()
-            start_date = max(start_date, min_date_obj.date())
-            end_date = min(end_date, max_date_obj.date())
+            # Note: analysis_years calculation moved below to respect user's years_back selection
             
-            # Update years span
-            years_span = list(range(start_date.year, end_date.year + 1))
-            
-            st.sidebar.info(f"📅 **Auto-adjusted Range:** {start_date} to {end_date} (event ± 1 day)")
+            st.sidebar.info(f"📅 **Auto-set Event:** {event_datetime.strftime('%Y-%m-%d %H:%M')}")
     
     # Handle event selection
     if selected_event_name != "Custom Selection":
@@ -877,6 +1133,8 @@ def main():
             mesh_description += " (aggregated)"
     
     config_summary = f"""
+    **Event DateTime:** {event_datetime.strftime('%Y-%m-%d %H:%M')}
+    **Analysis Years:** {len(analysis_years)} years ({min(analysis_years)}-{max(analysis_years)})
     **Library:** {selected_impl_display.split(' ')[1]}
     **Matrix Profile:** {'Left' if use_left_mp else 'Standard'}
     **Window Size:** {subsequence_length} hours
@@ -888,9 +1146,13 @@ def main():
     
     # Store configuration in session state
     st.session_state.config = {
-        'start_date': start_date,
-        'end_date': end_date,
-        'years_span': years_span,
+        'event_datetime': event_datetime,
+        'analysis_years': analysis_years,
+        'years_back': years_back,  # Add the years_back parameter
+        # Note: Always use custom analysis logic (is_actual_event=False) to respect years_back setting
+        # Both Event Selection and Custom Selection should look back multiple years if requested
+        'is_actual_event': False,  # Always use custom analysis logic to respect years_back setting
+        'is_predefined_event': selected_event_name != "Custom Selection",  # True for predefined events
         'mesh_id_list': mesh_id_list,
         'multi_mesh_analysis': multi_mesh_analysis,
         'subsequence_length': subsequence_length,
@@ -930,13 +1192,15 @@ def real_time_analysis():
     
     # Load data
     if st.button("🔄 Load/Refresh Data"):
-        with st.spinner("Loading MSS data..."):
-            log_message(f"Loading data for {config['start_date']} to {config['end_date']} - {config['mesh_id_list']}")
-            data = load_mss_data_by_date_range(
-                start_date=config['start_date'],
-                end_date=config['end_date'],
+        with st.spinner("Loading MSS monthly time series data..."):
+            log_message(f"Loading monthly time series data for event: {config['event_datetime']} - {config['mesh_id_list']}")
+            data = load_mss_data_monthly_timeseries(
+                event_datetime=config['event_datetime'],
                 mesh_id_list=config['mesh_id_list'],
-                multi_mesh_analysis=config['multi_mesh_analysis']
+                multi_mesh_analysis=config['multi_mesh_analysis'],
+                years_back=config.get('years_back', None),  # Use years_back if available
+                is_actual_event=config.get('is_actual_event', False),  # Pass event type
+                is_predefined_event=config.get('is_predefined_event', False)  # Pass predefined event flag
             )
             
             if not data.empty:
@@ -949,7 +1213,7 @@ def real_time_analysis():
                 st.session_state.current_data = data
                 st.session_state.data_loaded = True
                 
-                # Enhanced success message with mesh information
+                # Enhanced success message with mesh and time series information
                 mesh_info = ""
                 if config['multi_mesh_analysis'] and len(config['mesh_id_list']) > 1:
                     mesh_info = f" from {len(config['mesh_id_list'])} aggregated meshes"
@@ -958,9 +1222,15 @@ def real_time_analysis():
                 else:
                     mesh_info = f" from mesh {config['mesh_id_list'][0]}"
                 
-                success_msg = f"Successfully loaded {len(data)} data points{mesh_info}"
+                # Add time series info
+                years_with_data = data['year_source'].nunique() if 'year_source' in data.columns else len(config['analysis_years'])
+                time_span = f"{data['timestamp'].min().strftime('%Y-%m-%d')} to {data['timestamp'].max().strftime('%Y-%m-%d')}"
+                
+                success_msg = f"Successfully loaded {len(data)} data points{mesh_info} from {years_with_data} yearly periods"
                 log_message(success_msg)
+                log_message(f"Time series spans: {time_span}")
                 st.success(success_msg)
+                st.info(f"📊 **Time Series:** {time_span} ({years_with_data} yearly monthly periods)")
             else:
                 st.error("Failed to load data. Check logs for details.")
                 return
@@ -994,12 +1264,18 @@ def real_time_analysis():
         )
     
     with col3:
-        sample_rows = st.selectbox(
+        sample_rows_option = st.selectbox(
             "Sample Rows to Display",
-            [10, 25, 50, 100, 500],
+            ["10", "25", "50", "100", "500", "All Data"],
             index=0,
             help="Number of rows to show in sample data table"
         )
+        
+        # Convert to integer or set to all data
+        if sample_rows_option == "All Data":
+            sample_rows = len(data)
+        else:
+            sample_rows = int(sample_rows_option)
     
     # Filter data based on date range
     mask = (data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)
@@ -1028,33 +1304,169 @@ def real_time_analysis():
         hide_index=True
     )
     
-    # Add data visualization for preview
+    # Add enhanced data visualization with year-by-year plots
     st.subheader("📊 Data Preview Visualization")
     
-    # Determine value column
-    value_col = 'population' if 'population' in filtered_data.columns else 'value'
-    sample_viz_data = filtered_data.head(sample_rows)
+    # Check if we have year_source data for separate year plotting
+    if 'year_source' in filtered_data.columns:
+        st.write("**Individual Year Analysis:**")
+        
+        # Create year-by-year visualization
+        available_years = sorted(filtered_data['year_source'].unique())
+        
+        # Option to select which years to display
+        selected_years_for_viz = st.multiselect(
+            "Select years to visualize",
+            options=available_years,
+            default=available_years[:3] if len(available_years) > 3 else available_years,
+            help="Select which years to display in the visualization"
+        )
+        
+        if selected_years_for_viz:
+            # Create single plot with all years on same axis
+            fig_years = go.Figure()
+            
+            # Determine value column
+            value_col = 'population' if 'population' in filtered_data.columns else 'value'
+            
+            colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+            
+            for i, year in enumerate(selected_years_for_viz):
+                year_data = filtered_data[filtered_data['year_source'] == year].copy()
+                
+                # Create a relative time axis for better comparison (hours from start of period)
+                if not year_data.empty:
+                    year_data = year_data.sort_values('timestamp')
+                    start_time = year_data['timestamp'].min()
+                    year_data['relative_time'] = (year_data['timestamp'] - start_time).dt.total_seconds() / 3600  # Hours from start
+                    
+                    fig_years.add_trace(
+                        go.Scatter(
+                            x=year_data['relative_time'],
+                            y=year_data[value_col],
+                            mode='lines+markers',
+                            name=f'Year {year}',
+                            line=dict(color=colors[i % len(colors)], width=2),
+                            marker=dict(size=3),
+                            showlegend=True
+                        )
+                    )
+            
+            fig_years.update_layout(
+                height=400,
+                title=f"{value_col.title()} Over Time - Year by Year Comparison (Same Axis)",
+                xaxis_title="Hours from Period Start",
+                yaxis_title=value_col.title(),
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_years, width='stretch')
+        
+        # Combined view toggle
+        show_combined = st.checkbox("Show Combined View", value=True)
+        
+        if show_combined:
+            st.write("**Combined Time Series View:**")
+    else:
+        # Fallback for data without year_source
+        show_combined = True
     
-    fig_preview = go.Figure()
-    
-    fig_preview.add_trace(go.Scatter(
-        x=sample_viz_data['timestamp'],
-        y=sample_viz_data[value_col],
-        mode='lines+markers',
-        name=f'{value_col.title()} (Sample)',
-        line=dict(color='blue', width=2),
-        marker=dict(size=4)
-    ))
-    
-    fig_preview.update_layout(
-        title=f"{value_col.title()} Over Time (Sample Data)",
-        xaxis_title="Time",
-        yaxis_title=value_col.title(),
-        height=400,
-        showlegend=True
-    )
-    
-    st.plotly_chart(fig_preview, width="stretch")
+    if show_combined or 'year_source' not in filtered_data.columns:
+        # Determine value column
+        value_col = 'population' if 'population' in filtered_data.columns else 'value'
+        sample_viz_data = filtered_data.head(sample_rows)
+        
+        fig_preview = go.Figure()
+        
+        # Create sequential plotting to avoid gaps between years
+        if 'year_source' in filtered_data.columns:
+            # Sort data and create sequential index
+            sorted_data = sample_viz_data.sort_values(['year_source', 'timestamp']).reset_index(drop=True)
+            colors = px.colors.qualitative.Set1
+            year_colors = {year: colors[i % len(colors)] for i, year in enumerate(sorted_data['year_source'].unique())}
+            
+            # Create sequential x-axis (0, 1, 2, 3, ...)
+            sequential_x = list(range(len(sorted_data)))
+            
+            # Create datetime labels for hover/display
+            datetime_labels = sorted_data['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+            
+            # Plot by year with sequential x but datetime hover
+            for year in sorted_data['year_source'].unique():
+                year_mask = sorted_data['year_source'] == year
+                year_indices = [i for i, mask in enumerate(year_mask) if mask]
+                year_values = sorted_data[year_mask][value_col]
+                year_datetime_labels = sorted_data[year_mask]['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                
+                fig_preview.add_trace(go.Scatter(
+                    x=year_indices,
+                    y=year_values,
+                    mode='lines+markers',
+                    name=f'Year {year}',
+                    line=dict(color=year_colors[year], width=2),
+                    marker=dict(size=4),
+                    customdata=year_datetime_labels,
+                    hovertemplate='<b>Year %{fullData.name}</b><br>Sequential Index: %{x}<br>DateTime: %{customdata}<br>Value: %{y}<extra></extra>'
+                ))
+            
+            # Add vertical lines between years
+            year_boundaries = []
+            current_index = 0
+            for year in sorted(sorted_data['year_source'].unique()):
+                year_count = (sorted_data['year_source'] == year).sum()
+                if current_index > 0:  # Don't add line at the beginning
+                    year_boundaries.append(current_index)
+                current_index += year_count
+            
+            # Add vertical lines at year boundaries
+            for boundary in year_boundaries:
+                fig_preview.add_vline(
+                    x=boundary,
+                    line_dash="dash",
+                    line_color="gray",
+                    opacity=0.7,
+                    annotation_text=f"Year boundary"
+                )
+            
+            # Create custom x-axis labels (every few points show the datetime)
+            tick_interval = max(1, len(sorted_data) // 10)  # Show ~10 labels
+            tick_positions = list(range(0, len(sorted_data), tick_interval))
+            tick_labels = [datetime_labels.iloc[i] if i < len(datetime_labels) else "" for i in tick_positions]
+            
+            fig_preview.update_layout(
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=tick_positions,
+                    ticktext=tick_labels,
+                    tickangle=45
+                )
+            )
+            
+        else:
+            # Fallback for data without year_source
+            sequential_x = list(range(len(sample_viz_data)))
+            datetime_labels = sample_viz_data['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+            
+            fig_preview.add_trace(go.Scatter(
+                x=sequential_x,
+                y=sample_viz_data[value_col],
+                mode='lines+markers',
+                name=f'{value_col.title()} (Sample)',
+                line=dict(color='blue', width=2),
+                marker=dict(size=4),
+                customdata=datetime_labels,
+                hovertemplate='<b>Sequential Data</b><br>Index: %{x}<br>DateTime: %{customdata}<br>Value: %{y}<extra></extra>'
+            ))
+        
+        fig_preview.update_layout(
+            title=f"{value_col.title()} Over Time (Combined Sequential View)",
+            xaxis_title="Sequential Time Index",
+            yaxis_title=value_col.title(),
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_preview, width='stretch')
     
     # Calculate and display enhanced metrics
     st.subheader("📈 Data Statistics")
@@ -1101,7 +1513,7 @@ def real_time_analysis():
         st.warning(f"⚠️ Warm-up period ({warm_up_period} hours) is quite large compared to available data ({data_length} points). "
                   f"Consider reducing it for more effective anomaly detection.")
     
-    # Display warm-up period info
+    # Display warm-up period info and analysis approach
     col1, col2, col3 = st.columns(3)
     with col1:
         st.info(f"🔧 **Warm-up Period:** {warm_up_period} hours")
@@ -1110,6 +1522,14 @@ def real_time_analysis():
     with col3:
         effective_rate = ((data_length - warm_up_period) / data_length) * 100
         st.info(f"📈 **Effective Coverage:** {effective_rate:.1f}%")
+    
+    # Analysis approach information
+    st.info("""
+    **🔬 Analysis Approach:** The matrix profile algorithm (STUMPY/SCAMP) analyzes the time series as 
+    **sequential numerical data** without using datetime information directly. The datetime stamps are only 
+    used for visualization and filtering - the core anomaly detection works on the ordered sequence of values, 
+    making it robust to irregular time intervals and focused on pattern detection.
+    """)
     
     # Run detection
     if st.button("🔍 Run Anomaly Detection"):
@@ -1246,7 +1666,7 @@ def real_time_analysis():
         display_detection_results(st.session_state.detection_results)
     
 def create_anomaly_heatmap(data: pd.DataFrame):
-    """Create a heatmap visualization similar to the andes.ipynb reference code."""
+    """Create a heatmap visualization with improved color scheme - white for normal data."""
     try:
         if data.empty or 'detected_anomaly' not in data.columns:
             st.warning("No anomaly data available for heatmap")
@@ -1257,46 +1677,170 @@ def create_anomaly_heatmap(data: pd.DataFrame):
         data_copy['hour'] = data_copy['timestamp'].dt.hour
         data_copy['date'] = data_copy['timestamp'].dt.date
         
-        # Create array for anomaly visualization (similar to the notebook code)
-        # Get unique dates and sort them
+        # Create array for anomaly visualization
         unique_dates = sorted(data_copy['date'].unique())
         
         if len(unique_dates) == 0:
             st.warning("No date data available for heatmap")
             return
         
-        # Create a matrix: rows = days, columns = hours (0-23)
-        anomaly_matrix = np.zeros((len(unique_dates), 24))
-        
-        # Fill the matrix with anomaly data
-        for i, date in enumerate(unique_dates):
-            day_data = data_copy[data_copy['date'] == date]
-            for _, row in day_data.iterrows():
-                hour = row['hour']
-                if 0 <= hour <= 23:  # Valid hour range
-                    if row['detected_anomaly']:
-                        anomaly_matrix[i, hour] = 2  # Anomaly detected
-                    else:
-                        anomaly_matrix[i, hour] = 1  # Normal data
-        
-        # Create the matplotlib figure
-        fig, ax = plt.subplots(figsize=(12, max(6, len(unique_dates) * 0.3)))
-        
-        # Use CMRmap_r colormap like in the reference code
-        im = ax.imshow(anomaly_matrix, cmap='CMRmap_r', aspect=0.7, interpolation='nearest')
-        
-        # Set up y-axis (dates)
-        ax.set_yticks(np.arange(len(unique_dates)))
-        ax.set_yticklabels([f"{date}" for date in unique_dates])
-        
-        # Set up x-axis (hours)
-        ax.set_xticks(np.arange(24))
-        ax.set_xticklabels([f"{i:02d}" for i in range(24)], rotation=45)
-        
-        # Add grid lines like in the reference code
-        # Vertical lines at 0.5 of each hour
-        for i in range(1, 24):
-            ax.axvline(i-0.5, color='black', linewidth=0.3)
+        # Check if we have year_source for year-separated heatmaps
+        if 'year_source' in data_copy.columns:
+            st.write("**Anomaly Heatmaps by Year:**")
+            
+            years = sorted(data_copy['year_source'].unique())
+            
+            # Option to select years for heatmap display
+            selected_years_heatmap = st.multiselect(
+                "Select years for heatmap display",
+                options=years,
+                default=years[:2] if len(years) > 2 else years,
+                help="Select which years to display in heatmaps"
+            )
+            
+            for year in selected_years_heatmap:
+                st.write(f"**Year {year} Anomaly Heatmap:**")
+                
+                year_data = data_copy[data_copy['year_source'] == year]
+                year_dates = sorted(year_data['date'].unique())
+                
+                if len(year_dates) == 0:
+                    st.write(f"No data available for year {year}")
+                    continue
+                
+                # Create matrix for this year: rows = days, columns = hours (0-23)
+                anomaly_matrix = np.zeros((len(year_dates), 24))
+                
+                # Fill the matrix: 0 = no data, 1 = normal, 2 = anomaly
+                for i, date in enumerate(year_dates):
+                    day_data = year_data[year_data['date'] == date]
+                    for _, row in day_data.iterrows():
+                        hour = row['hour']
+                        if 0 <= hour <= 23:  # Valid hour range
+                            if row['detected_anomaly']:
+                                anomaly_matrix[i, hour] = 2  # Anomaly detected
+                            else:
+                                anomaly_matrix[i, hour] = 1  # Normal data
+                
+                # Create the matplotlib figure for this year
+                fig, ax = plt.subplots(figsize=(12, max(4, len(year_dates) * 0.2)))
+                
+                # Custom colormap: 0=gray (no data), 1=white (normal), 2=red (anomaly)
+                from matplotlib.colors import ListedColormap
+                colors = ['lightgray', 'white', 'red']  # 0, 1, 2 respectively
+                custom_cmap = ListedColormap(colors)
+                
+                im = ax.imshow(anomaly_matrix, cmap=custom_cmap, aspect='auto', 
+                              interpolation='nearest', vmin=0, vmax=2)
+                
+                # Set up y-axis (dates)
+                if len(year_dates) <= 20:
+                    ax.set_yticks(np.arange(len(year_dates)))
+                    ax.set_yticklabels([f"{date}" for date in year_dates], fontsize=8)
+                else:
+                    # For many dates, show only every nth date
+                    step = max(1, len(year_dates) // 20)
+                    ticks = np.arange(0, len(year_dates), step)
+                    ax.set_yticks(ticks)
+                    ax.set_yticklabels([f"{year_dates[i]}" for i in ticks], fontsize=8)
+                
+                # Set up x-axis (hours)
+                ax.set_xticks(np.arange(24))
+                ax.set_xticklabels([f"{i:02d}" for i in range(24)], rotation=45, fontsize=8)
+                
+                # Add grid lines
+                for i in range(1, 24):
+                    ax.axvline(i-0.5, color='black', linewidth=0.2, alpha=0.3)
+                for i in range(1, len(year_dates)):
+                    ax.axhline(i-0.5, color='black', linewidth=0.2, alpha=0.3)
+                
+                # Labels and title
+                ax.set_xlabel('Hour of Day', fontsize=10)
+                ax.set_ylabel('Date', fontsize=10)
+                ax.set_title(f'Anomaly Detection Heatmap - Year {year}\n(White=Normal, Red=Anomaly, Gray=No Data)', 
+                           fontsize=12, pad=20)
+                
+                # Create custom legend
+                from matplotlib.patches import Patch
+                legend_elements = [
+                    Patch(facecolor='white', edgecolor='black', label='Normal'),
+                    Patch(facecolor='red', edgecolor='black', label='Anomaly'),
+                    Patch(facecolor='lightgray', edgecolor='black', label='No Data')
+                ]
+                ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+                
+        else:
+            # Original combined heatmap for data without year separation
+            st.write("**Combined Anomaly Heatmap:**")
+            
+            # Create a matrix: rows = days, columns = hours (0-23)
+            anomaly_matrix = np.zeros((len(unique_dates), 24))
+            
+            # Fill the matrix with anomaly data
+            for i, date in enumerate(unique_dates):
+                day_data = data_copy[data_copy['date'] == date]
+                for _, row in day_data.iterrows():
+                    hour = row['hour']
+                    if 0 <= hour <= 23:  # Valid hour range
+                        if row['detected_anomaly']:
+                            anomaly_matrix[i, hour] = 2  # Anomaly detected
+                        else:
+                            anomaly_matrix[i, hour] = 1  # Normal data
+            
+            # Create the matplotlib figure
+            fig, ax = plt.subplots(figsize=(12, max(6, len(unique_dates) * 0.25)))
+            
+            # Custom colormap: 0=gray (no data), 1=white (normal), 2=red (anomaly)
+            from matplotlib.colors import ListedColormap
+            colors = ['lightgray', 'white', 'red']
+            custom_cmap = ListedColormap(colors)
+            
+            im = ax.imshow(anomaly_matrix, cmap=custom_cmap, aspect='auto', 
+                          interpolation='nearest', vmin=0, vmax=2)
+            
+            # Set up y-axis (dates) - limit to reasonable number
+            if len(unique_dates) <= 30:
+                ax.set_yticks(np.arange(len(unique_dates)))
+                ax.set_yticklabels([f"{date}" for date in unique_dates], fontsize=8)
+            else:
+                # For many dates, show only every nth date
+                step = max(1, len(unique_dates) // 30)
+                ticks = np.arange(0, len(unique_dates), step)
+                ax.set_yticks(ticks)
+                ax.set_yticklabels([f"{unique_dates[i]}" for i in ticks], fontsize=8)
+            
+            # Set up x-axis (hours)
+            ax.set_xticks(np.arange(24))
+            ax.set_xticklabels([f"{i:02d}" for i in range(24)], rotation=45, fontsize=8)
+            
+            # Add grid lines
+            for i in range(1, 24):
+                ax.axvline(i-0.5, color='black', linewidth=0.2, alpha=0.3)
+            for i in range(1, len(unique_dates)):
+                ax.axhline(i-0.5, color='black', linewidth=0.2, alpha=0.3)
+            
+            # Labels and title
+            ax.set_xlabel('Hour of Day', fontsize=10)
+            ax.set_ylabel('Date', fontsize=10)
+            ax.set_title('Anomaly Detection Heatmap\n(White=Normal, Red=Anomaly, Gray=No Data)', 
+                       fontsize=12, pad=20)
+            
+            # Create custom legend
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor='white', edgecolor='black', label='Normal'),
+                Patch(facecolor='red', edgecolor='black', label='Anomaly'),
+                Patch(facecolor='lightgray', edgecolor='black', label='No Data')
+            ]
+            ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
         
         # Horizontal lines at 0.5 of each day
         for i in range(1, len(unique_dates)):
@@ -1450,7 +1994,7 @@ def create_anomaly_score_heatmap(data: pd.DataFrame):
         st.write("Debug info:", str(e))
 
 def display_detection_results(data: pd.DataFrame):
-    """Display anomaly detection results with warm-up period separation."""
+    """Display anomaly detection results with warm-up period separation and year-by-year analysis."""
     if data.empty:
         st.warning("No data to display")
         return
@@ -1467,7 +2011,75 @@ def display_detection_results(data: pd.DataFrame):
     config = st.session_state.get('detection_config', {})
     warm_up_period = config.get('warm_up_period', config.get('subsequence_length', 3))
     
-    # Key metrics with warm-up separation
+    # Year-by-year analysis if year_source is available
+    if 'year_source' in data.columns:
+        st.subheader("📊 Year-by-Year Anomaly Analysis")
+        
+        years = sorted(data['year_source'].unique())
+        year_stats = []
+        
+        for year in years:
+            year_data = data[data['year_source'] == year]
+            total_points = len(year_data)
+            total_anomalies = year_data['detected_anomaly'].sum()
+            if has_warmup_cols:
+                effective_anomalies = year_data['anomaly_after_warmup'].sum()
+            else:
+                effective_anomalies = total_anomalies
+            
+            max_score = year_data['anomaly_score'].max()
+            avg_score = year_data['anomaly_score'].mean()
+            
+            year_stats.append({
+                'Year': year,
+                'Total Points': total_points,
+                'Total Anomalies': total_anomalies,
+                'Effective Anomalies': effective_anomalies,
+                'Detection Rate (%)': (total_anomalies / total_points * 100) if total_points > 0 else 0,
+                'Max Score': max_score,
+                'Avg Score': avg_score
+            })
+        
+        # Display year-by-year table
+        year_df = pd.DataFrame(year_stats)
+        st.dataframe(year_df, width='stretch')
+        
+        # Year-by-year visualization
+        st.write("**Anomaly Distribution by Year:**")
+        
+        fig_years = go.Figure()
+        
+        fig_years.add_trace(go.Bar(
+            x=year_df['Year'],
+            y=year_df['Total Anomalies'],
+            name='Total Anomalies',
+            marker_color='red',
+            opacity=0.7
+        ))
+        
+        if has_warmup_cols:
+            fig_years.add_trace(go.Bar(
+                x=year_df['Year'],
+                y=year_df['Effective Anomalies'],
+                name='Effective Anomalies',
+                marker_color='darkred'
+            ))
+        
+        fig_years.update_layout(
+            title="Anomaly Count by Year",
+            xaxis_title="Year",
+            yaxis_title="Number of Anomalies",
+            height=400,
+            barmode='group'
+        )
+        
+        st.plotly_chart(fig_years, width='stretch')
+        
+        st.divider()
+    
+    # Overall metrics with warm-ßup separation
+    st.subheader("📈 Overall Detection Metrics")
+    
     if has_warmup_cols:
         col1, col2, col3, col4, col5 = st.columns(5)
         
@@ -1507,144 +2119,338 @@ def display_detection_results(data: pd.DataFrame):
         with col4:
             st.metric("📈 Avg Score", f"{avg_score:.2f}")
     
-    # Time series plot
+    # Time series plot - split by year to avoid gaps
     st.subheader("📈 Time Series with Anomalies")
     
-    fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=('Population Data', 'Anomaly Scores'),
-        vertical_spacing=0.1
-    )
-    
-    # Determine value column
-    value_col = 'population' if 'population' in data.columns else 'value'
-    
-    # Main time series
-    fig.add_trace(
-        go.Scatter(
-            x=data['timestamp'],
-            y=data[value_col],
-            mode='lines',
-            name='Normal Data',
-            line=dict(color='blue', width=1)
-        ),
-        row=1, col=1
-    )
-    
-    # Add warm-up period shading if we have the data
-    if has_warmup_cols and warm_up_period > 0:
-        warmup_end_time = data['timestamp'].iloc[min(warm_up_period-1, len(data)-1)]
-        fig.add_vrect(
-            x0=data['timestamp'].iloc[0],
-            x1=warmup_end_time,
-            fillcolor="gray",
-            opacity=0.2,
-            layer="below",
-            line_width=0,
-            annotation_text="Warm-up Period",
-            annotation_position="top left",
+    # Check if we have year data to split the plots
+    if 'year_source' in data.columns:
+        # Create separate plots for each year
+        available_years = sorted(data['year_source'].unique())
+        
+        # Option to select which years to display
+        selected_years_anomaly = st.multiselect(
+            "Select years to display in anomaly plots:",
+            options=available_years,
+            default=available_years,
+            help="Choose which years to show in the anomaly detection plots"
+        )
+        
+        if selected_years_anomaly:
+            for year in selected_years_anomaly:
+                st.write(f"**Year {year} Anomaly Detection Results:**")
+                year_data = data[data['year_source'] == year].copy()
+                
+                if year_data.empty:
+                    st.warning(f"No data available for year {year}")
+                    continue
+                
+                # Create sequential x-axis for this year to avoid timestamp gaps
+                year_data = year_data.sort_values('timestamp').reset_index(drop=True)
+                sequential_x = list(range(len(year_data)))
+                datetime_labels = year_data['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                
+                fig_year = make_subplots(
+                    rows=2, cols=1,
+                    subplot_titles=(f'Population Data - Year {year}', f'Anomaly Scores - Year {year}'),
+                    vertical_spacing=0.1
+                )
+                
+                # Determine value column
+                value_col = 'population' if 'population' in year_data.columns else 'value'
+                
+                # Main time series with sequential x-axis
+                fig_year.add_trace(
+                    go.Scatter(
+                        x=sequential_x,
+                        y=year_data[value_col],
+                        mode='lines',
+                        name='Normal Data',
+                        line=dict(color='blue', width=1),
+                        customdata=datetime_labels,
+                        hovertemplate='<b>Normal Data</b><br>Index: %{x}<br>DateTime: %{customdata}<br>Value: %{y}<extra></extra>'
+                    ),
+                    row=1, col=1
+                )
+                
+                # Add warm-up period shading only for the first year in the merged dataset
+                if has_warmup_cols and warm_up_period > 0:
+                    # Check if this year contains the beginning of the merged dataset
+                    first_year = sorted(data['year_source'].unique())[0]
+                    if year == first_year:
+                        # Only show warm-up period for the first year since detection runs on merged data
+                        warmup_end_idx = min(warm_up_period-1, len(year_data)-1)
+                        fig_year.add_vrect(
+                            x0=0,
+                            x1=warmup_end_idx,
+                            fillcolor="gray",
+                            opacity=0.2,
+                            layer="below",
+                            line_width=0,
+                            annotation_text="Warm-up Period (Global)",
+                            annotation_position="top left",
+                            row=1, col=1
+                        )
+                        fig_year.add_vrect(
+                            x0=0,
+                            x1=warmup_end_idx,
+                            fillcolor="gray",
+                            opacity=0.2,
+                            layer="below",
+                            line_width=0,
+                            row=2, col=1
+                        )
+                
+                # Anomalies with different markers for warm-up vs effective
+                if has_warmup_cols:
+                    # Warm-up anomalies (orange triangles)
+                    warmup_anomaly_mask = year_data['anomaly_in_warmup']
+                    warmup_anomaly_indices = [i for i, mask in enumerate(warmup_anomaly_mask) if mask]
+                    if warmup_anomaly_indices:
+                        warmup_anomaly_values = year_data[warmup_anomaly_mask][value_col]
+                        warmup_anomaly_times = year_data[warmup_anomaly_mask]['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                        
+                        fig_year.add_trace(
+                            go.Scatter(
+                                x=warmup_anomaly_indices,
+                                y=warmup_anomaly_values,
+                                mode='markers',
+                                name='Warm-up Anomalies',
+                                marker=dict(color='orange', size=8, symbol='triangle-up'),
+                                customdata=warmup_anomaly_times,
+                                hovertemplate='<b>Warm-up Anomaly</b><br>Index: %{x}<br>DateTime: %{customdata}<br>Value: %{y}<extra></extra>'
+                            ),
+                            row=1, col=1
+                        )
+                    
+                    # Effective anomalies (red X marks)
+                    effective_anomaly_mask = year_data['anomaly_after_warmup']
+                    effective_anomaly_indices = [i for i, mask in enumerate(effective_anomaly_mask) if mask]
+                    if effective_anomaly_indices:
+                        effective_anomaly_values = year_data[effective_anomaly_mask][value_col]
+                        effective_anomaly_times = year_data[effective_anomaly_mask]['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                        
+                        fig_year.add_trace(
+                            go.Scatter(
+                                x=effective_anomaly_indices,
+                                y=effective_anomaly_values,
+                                mode='markers',
+                                name='Effective Anomalies',
+                                marker=dict(color='red', size=8, symbol='x'),
+                                customdata=effective_anomaly_times,
+                                hovertemplate='<b>Effective Anomaly</b><br>Index: %{x}<br>DateTime: %{customdata}<br>Value: %{y}<extra></extra>'
+                            ),
+                            row=1, col=1
+                        )
+                else:
+                    # Fallback: show all anomalies in red
+                    anomaly_mask = year_data['detected_anomaly']
+                    anomaly_indices = [i for i, mask in enumerate(anomaly_mask) if mask]
+                    if anomaly_indices:
+                        anomaly_values = year_data[anomaly_mask][value_col]
+                        anomaly_times = year_data[anomaly_mask]['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+                        
+                        fig_year.add_trace(
+                            go.Scatter(
+                                x=anomaly_indices,
+                                y=anomaly_values,
+                                mode='markers',
+                                name='Detected Anomalies',
+                                marker=dict(color='red', size=8, symbol='x'),
+                                customdata=anomaly_times,
+                                hovertemplate='<b>Detected Anomaly</b><br>Index: %{x}<br>DateTime: %{customdata}<br>Value: %{y}<extra></extra>'
+                            ),
+                            row=1, col=1
+                        )
+                
+                # Anomaly scores with sequential x-axis
+                fig_year.add_trace(
+                    go.Scatter(
+                        x=sequential_x,
+                        y=year_data['anomaly_score'],
+                        mode='lines',
+                        name='Anomaly Score',
+                        line=dict(color='orange', width=2),
+                        customdata=datetime_labels,
+                        hovertemplate='<b>Anomaly Score</b><br>Index: %{x}<br>DateTime: %{customdata}<br>Score: %{y}<extra></extra>'
+                    ),
+                    row=2, col=1
+                )
+                
+                # Threshold line
+                threshold = st.session_state.get('detection_threshold', None)
+                if threshold is not None:
+                    config = st.session_state.get('config', {})
+                    threshold_method = config.get('threshold_method', 'unknown')
+                    fig_year.add_hline(
+                        y=threshold,
+                        line_dash="dash",
+                        line_color="red",
+                        annotation_text=f"Threshold ({threshold_method})",
+                        row=2, col=1
+                    )
+                
+                # Custom x-axis labels with datetime
+                tick_interval = max(1, len(year_data) // 10)  # Show ~10 labels
+                tick_positions = list(range(0, len(year_data), tick_interval))
+                tick_labels = [datetime_labels[i] if i < len(datetime_labels) else "" for i in tick_positions]
+                
+                fig_year.update_layout(
+                    height=500,
+                    title_text=f"Anomaly Detection Results - Year {year}",
+                    showlegend=True,
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=tick_positions,
+                        ticktext=tick_labels,
+                        tickangle=45
+                    ),
+                    xaxis2=dict(
+                        tickmode='array',
+                        tickvals=tick_positions,
+                        ticktext=tick_labels,
+                        tickangle=45
+                    )
+                )
+                
+                fig_year.update_xaxes(title_text="Sequential Time Index", row=2, col=1)
+                fig_year.update_yaxes(title_text=value_col.title(), row=1, col=1)
+                fig_year.update_yaxes(title_text="Anomaly Score", row=2, col=1)
+                
+                st.plotly_chart(fig_year, width="stretch")
+                st.divider()
+    else:
+        # Fallback: original single plot for data without year_source
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Population Data', 'Anomaly Scores'),
+            vertical_spacing=0.1
+        )
+        
+        # Determine value column
+        value_col = 'population' if 'population' in data.columns else 'value'
+        
+        # Main time series
+        fig.add_trace(
+            go.Scatter(
+                x=data['timestamp'],
+                y=data[value_col],
+                mode='lines',
+                name='Normal Data',
+                line=dict(color='blue', width=1)
+            ),
             row=1, col=1
         )
-        fig.add_vrect(
-            x0=data['timestamp'].iloc[0],
-            x1=warmup_end_time,
-            fillcolor="gray",
-            opacity=0.2,
-            layer="below",
-            line_width=0,
-            row=2, col=1
-        )
-    
-    # Anomalies with different markers for warm-up vs effective
-    if has_warmup_cols:
-        # Warm-up anomalies (orange triangles)
-        warmup_anomaly_data = data[data['anomaly_in_warmup']]
-        if not warmup_anomaly_data.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=warmup_anomaly_data['timestamp'],
-                    y=warmup_anomaly_data[value_col],
-                    mode='markers',
-                    name='Warm-up Anomalies',
-                    marker=dict(color='orange', size=8, symbol='triangle-up'),
-                    hovertemplate='<b>Warm-up Anomaly</b><br>Time: %{x}<br>Value: %{y}<extra></extra>'
-                ),
+        
+        # Add warm-up period shading if we have the data
+        if has_warmup_cols and warm_up_period > 0:
+            warmup_end_time = data['timestamp'].iloc[min(warm_up_period-1, len(data)-1)]
+            fig.add_vrect(
+                x0=data['timestamp'].iloc[0],
+                x1=warmup_end_time,
+                fillcolor="gray",
+                opacity=0.2,
+                layer="below",
+                line_width=0,
+                annotation_text="Warm-up Period",
+                annotation_position="top left",
                 row=1, col=1
+            )
+            fig.add_vrect(
+                x0=data['timestamp'].iloc[0],
+                x1=warmup_end_time,
+                fillcolor="gray",
+                opacity=0.2,
+                layer="below",
+                line_width=0,
+                row=2, col=1
             )
         
-        # Effective anomalies (red X marks)
-        effective_anomaly_data = data[data['anomaly_after_warmup']]
-        if not effective_anomaly_data.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=effective_anomaly_data['timestamp'],
-                    y=effective_anomaly_data[value_col],
-                    mode='markers',
-                    name='Effective Anomalies',
-                    marker=dict(color='red', size=8, symbol='x'),
-                    hovertemplate='<b>Effective Anomaly</b><br>Time: %{x}<br>Value: %{y}<extra></extra>'
-                ),
-                row=1, col=1
-            )
-    else:
-        # Fallback: show all anomalies in red
-        anomaly_data = data[data['detected_anomaly']]
-        if not anomaly_data.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=anomaly_data['timestamp'],
-                    y=anomaly_data[value_col],
-                    mode='markers',
-                    name='Detected Anomalies',
-                    marker=dict(color='red', size=8, symbol='x')
-                ),
-                row=1, col=1
-            )
-    
-    # Anomaly scores
-    fig.add_trace(
-        go.Scatter(
-            x=data['timestamp'],
-            y=data['anomaly_score'],
-            mode='lines',
-            name='Anomaly Score',
-            line=dict(color='orange', width=2)
-        ),
-        row=2, col=1
-    )
-    
-    # Threshold line
-    threshold = st.session_state.get('detection_threshold', None)
-    if threshold is not None:
-        config = st.session_state.get('config', {})
-        threshold_method = config.get('threshold_method', 'unknown')
-        fig.add_hline(
-            y=threshold,
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"Threshold ({threshold_method})",
+        # Anomalies with different markers for warm-up vs effective
+        if has_warmup_cols:
+            # Warm-up anomalies (orange triangles)
+            warmup_anomaly_data = data[data['anomaly_in_warmup']]
+            if not warmup_anomaly_data.empty:
+                fig.add_trace(
+                    go.Scatter(
+                        x=warmup_anomaly_data['timestamp'],
+                        y=warmup_anomaly_data[value_col],
+                        mode='markers',
+                        name='Warm-up Anomalies',
+                        marker=dict(color='orange', size=8, symbol='triangle-up'),
+                        hovertemplate='<b>Warm-up Anomaly</b><br>Time: %{x}<br>Value: %{y}<extra></extra>'
+                    ),
+                    row=1, col=1
+                )
+            
+            # Effective anomalies (red X marks)
+            effective_anomaly_data = data[data['anomaly_after_warmup']]
+            if not effective_anomaly_data.empty:
+                fig.add_trace(
+                    go.Scatter(
+                        x=effective_anomaly_data['timestamp'],
+                        y=effective_anomaly_data[value_col],
+                        mode='markers',
+                        name='Effective Anomalies',
+                        marker=dict(color='red', size=8, symbol='x'),
+                        hovertemplate='<b>Effective Anomaly</b><br>Time: %{x}<br>Value: %{y}<extra></extra>'
+                    ),
+                    row=1, col=1
+                )
+        else:
+            # Fallback: show all anomalies in red
+            anomaly_data = data[data['detected_anomaly']]
+            if not anomaly_data.empty:
+                fig.add_trace(
+                    go.Scatter(
+                        x=anomaly_data['timestamp'],
+                        y=anomaly_data[value_col],
+                        mode='markers',
+                        name='Detected Anomalies',
+                        marker=dict(color='red', size=8, symbol='x')
+                    ),
+                    row=1, col=1
+                )
+        
+        # Anomaly scores
+        fig.add_trace(
+            go.Scatter(
+                x=data['timestamp'],
+                y=data['anomaly_score'],
+                mode='lines',
+                name='Anomaly Score',
+                line=dict(color='orange', width=2)
+            ),
             row=2, col=1
         )
-    
-    fig.update_layout(
-        height=600,
-        title_text="Anomaly Detection Results",
-        showlegend=True
-    )
-    
-    fig.update_xaxes(title_text="Time", row=2, col=1)
-    fig.update_yaxes(title_text=value_col.title(), row=1, col=1)
-    fig.update_yaxes(title_text="Anomaly Score", row=2, col=1)
-    
-    st.plotly_chart(fig, width="stretch")
+        
+        # Threshold line
+        threshold = st.session_state.get('detection_threshold', None)
+        if threshold is not None:
+            config = st.session_state.get('config', {})
+            threshold_method = config.get('threshold_method', 'unknown')
+            fig.add_hline(
+                y=threshold,
+                line_dash="dash",
+                line_color="red",
+                annotation_text=f"Threshold ({threshold_method})",
+                row=2, col=1
+            )
+        
+        fig.update_layout(
+            height=600,
+            title_text="Anomaly Detection Results",
+            showlegend=True
+        )
+        
+        fig.update_xaxes(title_text="Time", row=2, col=1)
+        fig.update_yaxes(title_text=value_col.title(), row=1, col=1)
+        fig.update_yaxes(title_text="Anomaly Score", row=2, col=1)
+        
+        st.plotly_chart(fig, width="stretch")
     
     # Anomaly details
     if total_anomalies > 0:
-        # Add heatmap visualization before anomaly details
-        st.subheader("🗓️ Anomaly Heatmap")
-        create_anomaly_heatmap(data)
-        
-        # Add anomaly score heatmap
+        # Add anomaly score heatmap (year-by-year plots are already available above)
         st.subheader("🌡️ Anomaly Score Heatmap")
         create_anomaly_score_heatmap(data)
         
@@ -1691,26 +2497,27 @@ def historical_analysis():
     
     data = st.session_state.current_data.copy()
     
-    # Date range selector - use analysis date range if available
+    # Display information about the loaded time series
+    if 'year_source' in data.columns:
+        years_available = sorted(data['year_source'].unique())
+        st.info(f"📊 **Monthly Time Series Data:** Loaded data from {len(years_available)} years: {', '.join(map(str, years_available))}")
+        st.info(f"🕐 **Time Range:** {data['timestamp'].min().strftime('%Y-%m-%d %H:%M')} to {data['timestamp'].max().strftime('%Y-%m-%d %H:%M')}")
+    
+    # Date range selector for filtering within the loaded time series
     col1, col2 = st.columns(2)
     
-    # Set default date range from Real-time Analysis if available
-    if 'analysis_date_range' in st.session_state:
-        default_start, default_end = st.session_state.analysis_date_range
-    else:
-        default_start = data['timestamp'].min().date()
-        default_end = data['timestamp'].max().date()
-    
     with col1:
-        start_date = st.date_input("Start Date", default_start,
+        start_date = st.date_input("Filter Start Date", 
+                                 data['timestamp'].min().date(),
                                  min_value=data['timestamp'].min().date(),
                                  max_value=data['timestamp'].max().date(),
-                                 help="Defaults to Real-time Analysis date range")
+                                 help="Filter the loaded time series data from this date")
     with col2:
-        end_date = st.date_input("End Date", default_end,
+        end_date = st.date_input("Filter End Date", 
+                               data['timestamp'].max().date(),
                                min_value=data['timestamp'].min().date(),
                                max_value=data['timestamp'].max().date(),
-                               help="Defaults to Real-time Analysis date range")
+                               help="Filter the loaded time series data to this date")
     
     # Filter data
     mask = (data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)
@@ -2299,11 +3106,12 @@ def documentation():
     
     #### Data Configuration
     - **Date Range Selection**: Choose start and end dates (supports multi-year ranges)
-    - **Event Selection**: Choose from predefined major events with pre-configured mesh codes
+    - **Event Selection**: Choose from predefined major events with pre-configured mesh codes (1 month before + 1 week after event date)
+    - **Custom Selection**: Manual date/mesh selection (1 month before until event date)
     - **Event-based Mesh IDs**: Automatic mesh code selection based on event location
     - **Custom Mesh Selection**: Manual mesh ID input for custom analysis areas
     - **Multi-mesh Analysis**: Aggregate multiple mesh regions or use main event mesh only
-    - **Date Range Filtering**: Analysis can span across multiple years of data
+    - **Years Back Control**: Both Event Selection and Custom Selection respect the years back setting for multi-year analysis
     
     #### Available Events
     - **Haneda Airport runway collision** (Jan 2, 2024) - 9 mesh codes around Tokyo Haneda
