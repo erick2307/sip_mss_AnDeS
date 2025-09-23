@@ -37,58 +37,124 @@ from core import LazyDatabase, ScampAnomalyDetector, DataGenerator
 from datetime import timezone
 
 # Event-based mesh codes for specific events
+# events = [
+#     {
+#         'event_dt': datetime(2024,1,2,17,0,0,0,timezone.utc),
+#         'meshcode' : 533937621,
+#         'meshcodes': [533937614, 533937623, 533937624,
+#                      533937612, 533937621, 533937622,
+#                      533937514, 533937523, 533937524],
+#         'event': 'Haneda Airport runway collision'
+#     },
+#     {
+#         'event_dt': datetime(2024,2,7,0,0,0,0,timezone.utc),
+#         'meshcode' : 533946403,
+#         'meshcodes': [533945592, 533946501, 533946502,
+#                      533945494, 533946403, 533946404,
+#                      533945492, 533946401, 533946402],
+#         'event': 'Taylor Swift – The Eras Tour (Tokyo Dome)'
+#     },
+#     {
+#         'event_dt': datetime(2024,1,1,0,0,0,0,timezone.utc),
+#         'meshcode' : 533946403,
+#         'meshcodes': [533945592, 533946501, 533946502,
+#                      533945494, 533946403, 533946404,
+#                      533945492, 533946401, 533946402],
+#         'event': 'Bruno Mars - (Tokyo Dome)'
+#     },
+#     {
+#         'event_dt': datetime(2024,8,11,10,0,0,0,timezone.utc),
+#         'meshcode' : 533947534,
+#         'meshcodes': [533947631, 533947632, 533947641,
+#                      533947533, 533947534, 533947543,
+#                      533947531, 533947532, 533947541],
+#         'event': 'Comic Market 104 (Tokyo Big Sight)'
+#     },
+#     {
+#         'event_dt': datetime(2024,9,28,10,0,0,0,timezone.utc),
+#         'meshcode' : 534041724,
+#         'meshcodes': [534041821, 534041822, 534041831,
+#                      534041723, 534041724, 534041733,
+#                      534041721, 534041722, 534041731],
+#         'event': 'Tokyo Game Show 2024 (Makuhari Messe)'
+#     },
+#     {
+#         'event_dt' : datetime(2024,1,1,16,0,0,0,timezone.utc),
+#         'meshcode' : 563712214,
+#         'meshcodes' : [563712311, 563712312, 563712321,
+#              563712213, 563712214, 563712223,
+#              563712211], # 3x3 from left→right, top→bottom (center/main=563712214)
+#         'event' : 'Noto Peninsula Earthquake (Mw7.5)'
+#     }
+# ]
+
 events = [
+
+    {
+        'event_dt': datetime(2016,4,16,1,25,0,0,timezone.utc),
+        'meshcode': 493120034,
+        'meshcodes': [493120131, 493120132, 493120141,
+                      493120033, 493120034, 493120043,
+                      493120031, 493120032, 493120041],
+        'event': '2016 Kumamoto Earthquakes (Mw7.0 mainshock)'
+    },
+
+    {
+        'event_dt': datetime(2018,6,18,7,58,0,0,timezone.utc),
+        'meshcode': 523524094,
+        'meshcodes': [523506211, 523506212, 523506213,
+                      523506221, 523506222, 523506223,
+                      523506231, 523506232, 523506233],
+        'event': 'Osaka Earthquake (Mw6.1)'
+    },
+
+    {
+        'event_dt': datetime(2018,7,7,3,0,0,0,timezone.utc),
+        'meshcode': 513336214,
+        'meshcodes': [513336211, 513336212, 513336213,
+                      513336221, 513336222, 513336223,
+                      513336231, 513336232, 513336233],
+        'event': '2018 Japan Floods (Hiroshima/Okayama, Heisei san-jū nen shichigatsu gōu)'
+    },
+
+    {
+        'event_dt': datetime(2018,9,6,3,8,0,0,timezone.utc),
+        'meshcode': 644142113,
+        'meshcodes': [644142111, 644142112, 644142113,
+                      644142121, 644142122, 644142123,
+                      644142131, 644142132, 644142133],
+        'event': 'Hokkaidō Eastern Iburi Earthquake (Mw6.6)'
+    },
+
+    {
+        'event_dt': datetime(2019,10,12,9,0,0,0,timezone.utc),
+        'meshcode': 533946403,
+        'meshcodes': [533945592, 533946501, 533946502,
+                      533945494, 533946403, 533946404,
+                      533945492, 533946401, 533946402],
+        'event': 'Typhoon Hagibis (Tokyo Metropolitan Evacuations)'
+    },
+
+    {
+        'event_dt': datetime(2024,1,1,16,0,0,0,timezone.utc),
+        'meshcode': 563712214,
+        'meshcodes': [563712311, 563712312, 563712321,
+                      563712213, 563712214, 563712223,
+                      563712211],
+        'event': 'Noto Peninsula Earthquake (Mw7.5)'
+    },
+
     {
         'event_dt': datetime(2024,1,2,17,0,0,0,timezone.utc),
-        'meshcode' : 533937621,
+        'meshcode': 533937621,
         'meshcodes': [533937614, 533937623, 533937624,
-                     533937612, 533937621, 533937622,
-                     533937514, 533937523, 533937524],
-        'event': 'Haneda Airport runway collision',
-        'merge': False,
-        'order': 4
-    },
-    {
-        'event_dt': datetime(2024,2,7,0,0,0,0,timezone.utc),
-        'meshcode' : 533946403,
-        'meshcodes': [533945592, 533946501, 533946502,
-                     533945494, 533946403, 533946404,
-                     533945492, 533946401, 533946402],
-        'event': 'Taylor Swift – The Eras Tour (Tokyo Dome)',
-        'merge': False,
-        'order': 4
-    },
-    {
-        'event_dt': datetime(2024,1,1,0,0,0,0,timezone.utc),
-        'meshcode' : 533946403,
-        'meshcodes': [533945592, 533946501, 533946502,
-                     533945494, 533946403, 533946404,
-                     533945492, 533946401, 533946402],
-        'event': 'Bruno Mars - (Tokyo Dome)',
-        'merge': False,
-        'order': 4
-    },
-    {
-        'event_dt': datetime(2024,8,11,10,0,0,0,timezone.utc),
-        'meshcode' : 533947534,
-        'meshcodes': [533947631, 533947632, 533947641,
-                     533947533, 533947534, 533947543,
-                     533947531, 533947532, 533947541],
-        'event': 'Comic Market 104 (Tokyo Big Sight)',
-        'merge': False,
-        'order': 4
-    },
-    {
-        'event_dt': datetime(2024,9,28,10,0,0,0,timezone.utc),
-        'meshcode' : 534041724,
-        'meshcodes': [534041821, 534041822, 534041831,
-                     534041723, 534041724, 534041733,
-                     534041721, 534041722, 534041731],
-        'event': 'Tokyo Game Show 2024 (Makuhari Messe)',
-        'merge': False,
-        'order': 4
+                      533937612, 533937621, 533937622,
+                      533937514, 533937523, 533937524],
+        'event': 'Haneda Airport runway collision'
     }
+
 ]
+
 
 # Set page configuration
 st.set_page_config(
@@ -394,11 +460,23 @@ def load_mss_data_single_year(year: int, mesh_id_list: List[str], multi_mesh_ana
         
         # Process the data based on multi_mesh_analysis setting
         if multi_mesh_analysis and len(extracted_data) > 1:
-            # Aggregate data from all mesh IDs (sum)
-            aggregated_data = np.sum(extracted_data, axis=0)
+            # Aggregate data from all mesh IDs (sum), handling -1 values properly
+            # Convert to numpy array for easier manipulation
+            data_array = np.array(extracted_data)
+            
+            # Replace -1 with np.nan for proper aggregation
+            data_array = np.where(data_array == -1, np.nan, data_array)
+            
+            # Sum ignoring NaN values (use nansum)
+            aggregated_data = np.nansum(data_array, axis=0)
+            
+            # If all values for a time point are NaN, set result to -1 (no data)
+            all_nan_mask = np.all(np.isnan(data_array), axis=0)
+            aggregated_data = np.where(all_nan_mask, -1, aggregated_data)
+            
             # Use 5th element of mesh list or first if less than 5 elements
             mesh_id_value = valid_mesh_ids[4] if len(valid_mesh_ids) > 4 else valid_mesh_ids[0]
-            log_message(f"Aggregated data from {len(extracted_data)} mesh IDs", "info")
+            log_message(f"Aggregated data from {len(extracted_data)} mesh IDs (handling -1 values properly)", "info")
         else:
             # Use single mesh (first valid one)
             aggregated_data = extracted_data[0]
@@ -495,6 +573,13 @@ class RealTimeAnomalyDetector:
             # Use population or value column
             value_col = 'population' if 'population' in data.columns else 'value'
             values = data[value_col].values
+            
+            # Note: -1 values are already converted to np.nan during data loading
+            # Check for any remaining -1 values (should be none)
+            remaining_minus_ones = np.sum(values == -1) if len(values) > 0 else 0
+            if remaining_minus_ones > 0:
+                log_message(f"Warning: Found {remaining_minus_ones} unexpected -1 values in processed data", "warning")
+                values = np.where(values == -1, np.nan, values)
             
             # Create configuration dict
             config = {
@@ -695,7 +780,16 @@ def main():
     
     # Detection parameters
     st.sidebar.subheader("🔧 Detection Parameters")
-    subsequence_length = st.sidebar.slider("Subsequence Length (hours)", 3, 24, 24)
+    subsequence_length = st.sidebar.slider("Subsequence Length (hours)", 3, 24, 3)
+    
+    # Warm-up period slider - between subsequence_length and 8 * subsequence_length
+    warm_up_period = st.sidebar.slider(
+        "Warm-up Period (hours)", 
+        subsequence_length, 
+        8 * subsequence_length, 
+        subsequence_length,
+        help="Initial data points to exclude from anomaly flagging due to matrix profile warm-up"
+    )
     
     # Threshold method selection
     threshold_method = st.sidebar.selectbox(
@@ -786,6 +880,7 @@ def main():
     **Library:** {selected_impl_display.split(' ')[1]}
     **Matrix Profile:** {'Left' if use_left_mp else 'Standard'}
     **Window Size:** {subsequence_length} hours
+    **Warm-up Period:** {warm_up_period} hours
     **Threshold:** {threshold_method}
     **Mesh Analysis:** {mesh_description}
     """
@@ -799,6 +894,7 @@ def main():
         'mesh_id_list': mesh_id_list,
         'multi_mesh_analysis': multi_mesh_analysis,
         'subsequence_length': subsequence_length,
+        'warm_up_period': warm_up_period,
         'threshold_method': threshold_method,
         'threshold_multiplier': threshold_multiplier,
         'normalize_matrix_profile': normalize_matrix_profile,
@@ -844,6 +940,12 @@ def real_time_analysis():
             )
             
             if not data.empty:
+                # Convert -1 values to np.nan for proper handling throughout the app
+                value_col = 'population' if 'population' in data.columns else 'value'
+                original_minus_ones = (data[value_col] == -1).sum()
+                data[value_col] = data[value_col].replace(-1, np.nan)
+                log_message(f"Data preprocessing: converted {original_minus_ones} instances of -1 to np.nan for proper visualization and analysis", "info")
+                
                 st.session_state.current_data = data
                 st.session_state.data_loaded = True
                 
@@ -958,22 +1060,24 @@ def real_time_analysis():
     st.subheader("📈 Data Statistics")
     col1, col2, col3 = st.columns(3)
     
-    # Calculate no data entries (missing data or -1 values)
+    # Calculate no data entries (missing data or NaN values)
     no_data_count = 0
     if value_col in filtered_data.columns:
-        # Count -1 values and NaN values as "no data"
-        no_data_count = (
-            (filtered_data[value_col] == -1).sum() + 
-            filtered_data[value_col].isna().sum()
-        )
+        # Count NaN values as "no data" (previously -1 values, now converted)
+        no_data_count = filtered_data[value_col].isna().sum()
     
     with col1:
         if value_col in filtered_data.columns:
+            # Use nanmin and nanmax to ignore NaN values (previously -1)
+            min_val = np.nanmin(filtered_data[value_col])
+            max_val = np.nanmax(filtered_data[value_col])
             st.metric("📊 Population Range", 
-                     f"{filtered_data[value_col].min():.0f} - {filtered_data[value_col].max():.0f}")
+                     f"{min_val:.0f} - {max_val:.0f}")
         else:
+            min_val = np.nanmin(filtered_data[value_col])
+            max_val = np.nanmax(filtered_data[value_col])
             st.metric("📊 Value Range", 
-                     f"{filtered_data[value_col].min():.2f} - {filtered_data[value_col].max():.2f}")
+                     f"{min_val:.2f} - {max_val:.2f}")
     
     with col2:
         time_range = filtered_data['timestamp'].max() - filtered_data['timestamp'].min()
@@ -984,6 +1088,28 @@ def real_time_analysis():
                  f"{no_data_count} ({(no_data_count/len(filtered_data)*100):.1f}%)")
     
     st.divider()
+    
+    # Warm-up period validation
+    warm_up_period = config.get('warm_up_period', config['subsequence_length'])
+    data_length = len(filtered_data)
+    
+    if warm_up_period >= data_length:
+        st.error(f"⚠️ Warm-up period ({warm_up_period} hours) is larger than available data ({data_length} points). "
+                f"Please reduce the warm-up period to less than {data_length} hours.")
+        return
+    elif warm_up_period > data_length * 0.5:
+        st.warning(f"⚠️ Warm-up period ({warm_up_period} hours) is quite large compared to available data ({data_length} points). "
+                  f"Consider reducing it for more effective anomaly detection.")
+    
+    # Display warm-up period info
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info(f"🔧 **Warm-up Period:** {warm_up_period} hours")
+    with col2:
+        st.info(f"📊 **Analysis Period:** {data_length - warm_up_period} hours")
+    with col3:
+        effective_rate = ((data_length - warm_up_period) / data_length) * 100
+        st.info(f"📈 **Effective Coverage:** {effective_rate:.1f}%")
     
     # Run detection
     if st.button("🔍 Run Anomaly Detection"):
@@ -1006,13 +1132,35 @@ def real_time_analysis():
                 results_data['detected_anomaly'] = anomalies
                 results_data['anomaly_score'] = scores
                 
+                # Apply warm-up period logic - mark warm-up anomalies separately
+                results_data['anomaly_in_warmup'] = False
+                results_data['anomaly_after_warmup'] = False
+                
+                # Separate anomalies by warm-up period
+                warm_up_mask = results_data.index < warm_up_period
+                
+                # Mark anomalies in warm-up period
+                warmup_anomalies = results_data['detected_anomaly'] & warm_up_mask
+                results_data.loc[warmup_anomalies, 'anomaly_in_warmup'] = True
+                
+                # Mark anomalies after warm-up period (these are the "real" anomalies)
+                effective_anomalies = results_data['detected_anomaly'] & ~warm_up_mask
+                results_data.loc[effective_anomalies, 'anomaly_after_warmup'] = True
+                
+                # Count anomalies
+                warmup_anomaly_count = warmup_anomalies.sum()
+                effective_anomaly_count = effective_anomalies.sum()
+                total_anomaly_count = results_data['detected_anomaly'].sum()
+                
                 # Store fresh results in session state with configuration
                 st.session_state.detection_results = results_data
                 st.session_state.detection_threshold = used_threshold
                 st.session_state.analysis_date_range = (start_date, end_date)  # Store date range
                 st.session_state.detection_config = config.copy()  # Store config used for this detection
                 st.session_state.last_processing_time = processing_time  # Store processing time
-                log_message(f"Detection complete: {np.sum(anomalies)} anomalies found in date range")
+                
+                log_message(f"Detection complete: {total_anomaly_count} total anomalies found "
+                           f"({warmup_anomaly_count} in warm-up, {effective_anomaly_count} after warm-up) in date range")
             else:
                 st.warning("No anomalies detected or detection failed. Check logs for details.")
                 return
@@ -1028,14 +1176,61 @@ def real_time_analysis():
                 config['threshold_method'] != detection_config.get('threshold_method') or
                 config['threshold_multiplier'] != detection_config.get('threshold_multiplier') or
                 config['subsequence_length'] != detection_config.get('subsequence_length') or
+                config['warm_up_period'] != detection_config.get('warm_up_period') or
                 config['normalize_matrix_profile'] != detection_config.get('normalize_matrix_profile') or
                 config.get('implementation') != detection_config.get('implementation') or
                 config.get('use_left_mp') != detection_config.get('use_left_mp')
             )
             
+            # Special handling for warm-up period changes
+            warmup_changed = config['warm_up_period'] != detection_config.get('warm_up_period')
+            
             if config_changed:
-                st.warning("⚠️ **Configuration Changed:** The displayed results were generated with different settings. "
-                          "Run anomaly detection again to see results with current configuration.")
+                if warmup_changed:
+                    st.warning("⚠️ **Warm-up Period Changed:** The displayed results were generated with a different warm-up period. "
+                              "Run anomaly detection again to apply the new warm-up period to the analysis.")
+                    
+                    # Offer dynamic warm-up period adjustment
+                    if st.button("🔄 Quick Update: Re-apply Warm-up Period"):
+                        with st.spinner("Re-applying warm-up period to existing results..."):
+                            results_data = st.session_state.detection_results.copy()
+                            new_warm_up_period = config['warm_up_period']
+                            
+                            # Reset warm-up columns
+                            results_data['anomaly_in_warmup'] = False
+                            results_data['anomaly_after_warmup'] = False
+                            
+                            # Re-apply warm-up logic with new period
+                            warm_up_mask = results_data.index < new_warm_up_period
+                            
+                            # Mark anomalies in warm-up period
+                            warmup_anomalies = results_data['detected_anomaly'] & warm_up_mask
+                            results_data.loc[warmup_anomalies, 'anomaly_in_warmup'] = True
+                            
+                            # Mark anomalies after warm-up period (these are the "real" anomalies)
+                            effective_anomalies = results_data['detected_anomaly'] & ~warm_up_mask
+                            results_data.loc[effective_anomalies, 'anomaly_after_warmup'] = True
+                            
+                            # Update session state with new analysis
+                            st.session_state.detection_results = results_data
+                            
+                            # Update config to match current settings for warm-up period
+                            updated_config = st.session_state.detection_config.copy()
+                            updated_config['warm_up_period'] = new_warm_up_period
+                            st.session_state.detection_config = updated_config
+                            
+                            # Count for log message
+                            warmup_count = warmup_anomalies.sum()
+                            effective_count = effective_anomalies.sum()
+                            
+                            log_message(f"Warm-up period updated to {new_warm_up_period} hours: "
+                                       f"{warmup_count} warm-up anomalies, {effective_count} effective anomalies", "info")
+                            
+                            st.success(f"✅ Warm-up period updated to {new_warm_up_period} hours!")
+                            st.rerun()
+                else:
+                    st.warning("⚠️ **Configuration Changed:** The displayed results were generated with different settings. "
+                              "Run anomaly detection again to see results with current configuration.")
         
         # Show analysis info
         if 'analysis_date_range' in st.session_state:
@@ -1143,8 +1338,119 @@ def create_anomaly_heatmap(data: pd.DataFrame):
         st.error(f"Error creating heatmap: {e}")
         st.write("Debug info:", str(e))
 
+def create_anomaly_score_heatmap(data: pd.DataFrame):
+    """Create a heatmap visualization showing anomaly scores as continuous values."""
+    try:
+        if data.empty or 'anomaly_score' not in data.columns:
+            st.warning("No anomaly score data available for heatmap")
+            return
+        
+        # Get anomaly data
+        data_copy = data.copy()
+        data_copy['hour'] = data_copy['timestamp'].dt.hour
+        data_copy['date'] = data_copy['timestamp'].dt.date
+        
+        # Create array for anomaly score visualization
+        # Get unique dates and sort them
+        unique_dates = sorted(data_copy['date'].unique())
+        
+        if len(unique_dates) == 0:
+            st.warning("No date data available for score heatmap")
+            return
+        
+        # Create a matrix: rows = days, columns = hours (0-23)
+        # Initialize with NaN to represent no data
+        score_matrix = np.full((len(unique_dates), 24), np.nan)
+        
+        # Fill the matrix with anomaly scores
+        for i, date in enumerate(unique_dates):
+            day_data = data_copy[data_copy['date'] == date]
+            for _, row in day_data.iterrows():
+                hour = row['hour']
+                if 0 <= hour <= 23:  # Valid hour range
+                    score_matrix[i, hour] = row['anomaly_score']
+        
+        # Create the matplotlib figure
+        fig, ax = plt.subplots(figsize=(12, max(6, len(unique_dates) * 0.3)))
+        
+        # Use viridis colormap for continuous score values
+        # Mask NaN values to show them as white/transparent
+        masked_matrix = np.ma.masked_where(np.isnan(score_matrix), score_matrix)
+        
+        im = ax.imshow(masked_matrix, cmap='viridis', aspect=0.7, interpolation='nearest')
+        
+        # Set up y-axis (dates)
+        ax.set_yticks(np.arange(len(unique_dates)))
+        ax.set_yticklabels([f"{date}" for date in unique_dates])
+        
+        # Set up x-axis (hours)
+        ax.set_xticks(np.arange(24))
+        ax.set_xticklabels([f"{i:02d}" for i in range(24)], rotation=45)
+        
+        # Add grid lines
+        # Vertical lines at 0.5 of each hour
+        for i in range(1, 24):
+            ax.axvline(i-0.5, color='black', linewidth=0.3)
+        
+        # Horizontal lines at 0.5 of each day
+        for i in range(1, len(unique_dates)):
+            ax.axhline(i-0.5, color='black', linewidth=0.3)
+        
+        # Labels and title
+        ax.set_xlabel("Hour Frame of the day (e.g. 08 means 08:00 to 08:59)")
+        ax.set_ylabel("Date")
+        
+        # Create title with mesh info if available
+        mesh_info = ""
+        if 'mesh_id' in data.columns and not data['mesh_id'].empty:
+            mesh_id = data['mesh_id'].iloc[0]
+            mesh_info = f" - Mesh ID: {mesh_id}"
+        
+        date_range = f"{unique_dates[0]} to {unique_dates[-1]}"
+        ax.set_title(f"Anomaly Score Heatmap{mesh_info}\n{date_range}")
+        
+        # Add colorbar with continuous scale
+        cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+        cbar.set_label('Anomaly Score', rotation=270, labelpad=15)
+        
+        # Add threshold line if available
+        if 'detection_threshold' in st.session_state and st.session_state.detection_threshold is not None:
+            threshold = st.session_state.detection_threshold
+            # Add threshold information to the plot
+            ax.text(0.02, 0.98, f'Threshold: {threshold:.2f}', 
+                   transform=ax.transAxes, fontsize=10, 
+                   verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        # Adjust layout to prevent label cutoff
+        plt.tight_layout()
+        
+        # Display in Streamlit
+        st.pyplot(fig)
+        plt.close(fig)  # Clean up to avoid memory leaks
+        
+        # Display summary statistics for scores
+        valid_scores = score_matrix[~np.isnan(score_matrix)]
+        if len(valid_scores) > 0:
+            min_score = np.min(valid_scores)
+            max_score = np.max(valid_scores)
+            mean_score = np.mean(valid_scores)
+            
+            # Count scores above threshold if threshold is available
+            threshold_info = ""
+            if 'detection_threshold' in st.session_state and st.session_state.detection_threshold is not None:
+                threshold = st.session_state.detection_threshold
+                above_threshold = np.sum(valid_scores > threshold)
+                threshold_info = f" | {above_threshold} scores above threshold ({threshold:.2f})"
+            
+            st.info(f"📊 **Score Heatmap Summary:** Min: {min_score:.2f}, Max: {max_score:.2f}, Mean: {mean_score:.2f}{threshold_info}")
+        
+    except Exception as e:
+        st.error(f"Error creating score heatmap: {e}")
+        st.write("Debug info:", str(e))
+
 def display_detection_results(data: pd.DataFrame):
-    """Display anomaly detection results."""
+    """Display anomaly detection results with warm-up period separation."""
     if data.empty:
         st.warning("No data to display")
         return
@@ -1154,22 +1460,52 @@ def display_detection_results(data: pd.DataFrame):
         st.error("Detection results not available. Run anomaly detection first.")
         return
     
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
+    # Check if warm-up period columns exist
+    has_warmup_cols = 'anomaly_in_warmup' in data.columns and 'anomaly_after_warmup' in data.columns
     
-    total_anomalies = data['detected_anomaly'].sum()
-    detection_rate = total_anomalies / len(data) * 100
-    max_score = data['anomaly_score'].max()
-    avg_score = data['anomaly_score'].mean()
+    # Get warm-up period from config
+    config = st.session_state.get('detection_config', {})
+    warm_up_period = config.get('warm_up_period', config.get('subsequence_length', 3))
     
-    with col1:
-        st.metric("🚨 Total Anomalies", total_anomalies)
-    with col2:
-        st.metric("📊 Detection Rate", f"{detection_rate:.1f}%")
-    with col3:
-        st.metric("⚡ Max Score", f"{max_score:.2f}")
-    with col4:
-        st.metric("📈 Avg Score", f"{avg_score:.2f}")
+    # Key metrics with warm-up separation
+    if has_warmup_cols:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        total_anomalies = data['detected_anomaly'].sum()
+        warmup_anomalies = data['anomaly_in_warmup'].sum()
+        effective_anomalies = data['anomaly_after_warmup'].sum()
+        detection_rate = total_anomalies / len(data) * 100
+        effective_rate = effective_anomalies / (len(data) - warm_up_period) * 100 if len(data) > warm_up_period else 0
+        max_score = data['anomaly_score'].max()
+        avg_score = data['anomaly_score'].mean()
+        
+        with col1:
+            st.metric("🚨 Total Anomalies", total_anomalies)
+        with col2:
+            st.metric("🔧 Warm-up Anomalies", warmup_anomalies, help="Anomalies in warm-up period (may be false positives)")
+        with col3:
+            st.metric("✅ Effective Anomalies", effective_anomalies, help="Anomalies after warm-up period")
+        with col4:
+            st.metric("📊 Effective Rate", f"{effective_rate:.1f}%", help="Detection rate excluding warm-up period")
+        with col5:
+            st.metric("⚡ Max Score", f"{max_score:.2f}")
+    else:
+        # Fallback to original metrics if warm-up columns don't exist
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_anomalies = data['detected_anomaly'].sum()
+        detection_rate = total_anomalies / len(data) * 100
+        max_score = data['anomaly_score'].max()
+        avg_score = data['anomaly_score'].mean()
+        
+        with col1:
+            st.metric("🚨 Total Anomalies", total_anomalies)
+        with col2:
+            st.metric("📊 Detection Rate", f"{detection_rate:.1f}%")
+        with col3:
+            st.metric("⚡ Max Score", f"{max_score:.2f}")
+        with col4:
+            st.metric("📈 Avg Score", f"{avg_score:.2f}")
     
     # Time series plot
     st.subheader("📈 Time Series with Anomalies")
@@ -1195,19 +1531,75 @@ def display_detection_results(data: pd.DataFrame):
         row=1, col=1
     )
     
-    # Anomalies
-    anomaly_data = data[data['detected_anomaly']]
-    if not anomaly_data.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=anomaly_data['timestamp'],
-                y=anomaly_data[value_col],
-                mode='markers',
-                name='Detected Anomalies',
-                marker=dict(color='red', size=8, symbol='x')
-            ),
+    # Add warm-up period shading if we have the data
+    if has_warmup_cols and warm_up_period > 0:
+        warmup_end_time = data['timestamp'].iloc[min(warm_up_period-1, len(data)-1)]
+        fig.add_vrect(
+            x0=data['timestamp'].iloc[0],
+            x1=warmup_end_time,
+            fillcolor="gray",
+            opacity=0.2,
+            layer="below",
+            line_width=0,
+            annotation_text="Warm-up Period",
+            annotation_position="top left",
             row=1, col=1
         )
+        fig.add_vrect(
+            x0=data['timestamp'].iloc[0],
+            x1=warmup_end_time,
+            fillcolor="gray",
+            opacity=0.2,
+            layer="below",
+            line_width=0,
+            row=2, col=1
+        )
+    
+    # Anomalies with different markers for warm-up vs effective
+    if has_warmup_cols:
+        # Warm-up anomalies (orange triangles)
+        warmup_anomaly_data = data[data['anomaly_in_warmup']]
+        if not warmup_anomaly_data.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=warmup_anomaly_data['timestamp'],
+                    y=warmup_anomaly_data[value_col],
+                    mode='markers',
+                    name='Warm-up Anomalies',
+                    marker=dict(color='orange', size=8, symbol='triangle-up'),
+                    hovertemplate='<b>Warm-up Anomaly</b><br>Time: %{x}<br>Value: %{y}<extra></extra>'
+                ),
+                row=1, col=1
+            )
+        
+        # Effective anomalies (red X marks)
+        effective_anomaly_data = data[data['anomaly_after_warmup']]
+        if not effective_anomaly_data.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=effective_anomaly_data['timestamp'],
+                    y=effective_anomaly_data[value_col],
+                    mode='markers',
+                    name='Effective Anomalies',
+                    marker=dict(color='red', size=8, symbol='x'),
+                    hovertemplate='<b>Effective Anomaly</b><br>Time: %{x}<br>Value: %{y}<extra></extra>'
+                ),
+                row=1, col=1
+            )
+    else:
+        # Fallback: show all anomalies in red
+        anomaly_data = data[data['detected_anomaly']]
+        if not anomaly_data.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=anomaly_data['timestamp'],
+                    y=anomaly_data[value_col],
+                    mode='markers',
+                    name='Detected Anomalies',
+                    marker=dict(color='red', size=8, symbol='x')
+                ),
+                row=1, col=1
+            )
     
     # Anomaly scores
     fig.add_trace(
@@ -1251,6 +1643,10 @@ def display_detection_results(data: pd.DataFrame):
         # Add heatmap visualization before anomaly details
         st.subheader("🗓️ Anomaly Heatmap")
         create_anomaly_heatmap(data)
+        
+        # Add anomaly score heatmap
+        st.subheader("🌡️ Anomaly Score Heatmap")
+        create_anomaly_score_heatmap(data)
         
         st.subheader("🔍 Anomaly Details")
         anomaly_details = data[data['detected_anomaly']].copy()
@@ -1334,10 +1730,11 @@ def historical_analysis():
     
     with col1:
         st.markdown("### 📈 Basic Statistics")
-        st.write(f"**Mean:** {filtered_data[value_col].mean():.2f}")
-        st.write(f"**Std Dev:** {filtered_data[value_col].std():.2f}")
-        st.write(f"**Min:** {filtered_data[value_col].min():.2f}")
-        st.write(f"**Max:** {filtered_data[value_col].max():.2f}")
+        # Use nan-aware functions to handle NaN values (previously -1)
+        st.write(f"**Mean:** {np.nanmean(filtered_data[value_col]):.2f}")
+        st.write(f"**Std Dev:** {np.nanstd(filtered_data[value_col]):.2f}")
+        st.write(f"**Min:** {np.nanmin(filtered_data[value_col]):.2f}")
+        st.write(f"**Max:** {np.nanmax(filtered_data[value_col]):.2f}")
     
     with col2:
         st.markdown("### 🚨 Anomaly Statistics")
@@ -1350,16 +1747,36 @@ def historical_analysis():
             current_date_range = (start_date, end_date)
             
             if detection_date_range == current_date_range:
-                # Use detection results directly
-                anomaly_count = detection_data['detected_anomaly'].sum()
-                total_points = len(detection_data)
+                # Use detection results directly with warm-up period awareness
                 config = st.session_state.get('detection_config', {})
                 threshold_method = config.get('threshold_method', 'Unknown')
+                warm_up_period = config.get('warm_up_period', config.get('subsequence_length', 3))
                 
-                st.write(f"**Total Anomalies:** {anomaly_count}")
-                st.write(f"**Total Points:** {total_points}")
-                st.write(f"**Anomaly Rate:** {(anomaly_count/total_points*100):.2f}%")
-                st.write(f"**Method Used:** {threshold_method}")
+                # Check if warm-up columns exist
+                has_warmup_cols = 'anomaly_in_warmup' in detection_data.columns and 'anomaly_after_warmup' in detection_data.columns
+                
+                if has_warmup_cols:
+                    total_anomalies = detection_data['detected_anomaly'].sum()
+                    warmup_anomalies = detection_data['anomaly_in_warmup'].sum()
+                    effective_anomalies = detection_data['anomaly_after_warmup'].sum()
+                    total_points = len(detection_data)
+                    effective_points = max(1, total_points - warm_up_period)  # Avoid division by zero
+                    
+                    st.write(f"**Total Anomalies:** {total_anomalies}")
+                    st.write(f"**Warm-up Anomalies:** {warmup_anomalies} (period: {warm_up_period}h)")
+                    st.write(f"**Effective Anomalies:** {effective_anomalies}")
+                    st.write(f"**Overall Rate:** {(total_anomalies/total_points*100):.2f}%")
+                    st.write(f"**Effective Rate:** {(effective_anomalies/effective_points*100):.2f}%")
+                    st.write(f"**Method Used:** {threshold_method}")
+                else:
+                    # Fallback to original display if warm-up columns don't exist
+                    anomaly_count = detection_data['detected_anomaly'].sum()
+                    total_points = len(detection_data)
+                    
+                    st.write(f"**Total Anomalies:** {anomaly_count}")
+                    st.write(f"**Total Points:** {total_points}")
+                    st.write(f"**Anomaly Rate:** {(anomaly_count/total_points*100):.2f}%")
+                    st.write(f"**Method Used:** {threshold_method}")
             else:
                 # Date range mismatch
                 st.write("**Status:** Results available for different date range")
@@ -1797,7 +2214,7 @@ def documentation():
     
     # Introduction
     st.markdown("""
-    ## 🌋 Welcome to AnDeS 2025
+    ## 🌋 Welcome to AnDeS
     
     The **ANomaly DEtection System (AnDeS)** is a cutting-edge anomaly detection platform 
     designed to identify unusual patterns in Mobile Spatial Statistics (MSS) data that may indicate 
@@ -2025,9 +2442,9 @@ def documentation():
     ---
     ### 👥 Credits
     
-    **AnDeS** is developed by the Erick Mas@Tohoku University.
+    **AnDeS** is developed by Erick Mas@Tohoku University.
     
-    **Based on**: AnDeS SCAMP algorithm for MSS data analysis
+    **Based on**: SCAMP algorithm
     
     **Version**: 2025.1.0
     
