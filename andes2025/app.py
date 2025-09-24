@@ -36,104 +36,52 @@ from core import LazyDatabase, ScampAnomalyDetector, DataGenerator
 # Define timezone for event dates
 from datetime import timezone
 
-# Event-based mesh codes for specific events
-# events = [
-#     {
-#         'event_dt': datetime(2024,1,2,17,0,0,0,timezone.utc),
-#         'meshcode' : 533937621,
-#         'meshcodes': [533937614, 533937623, 533937624,
-#                      533937612, 533937621, 533937622,
-#                      533937514, 533937523, 533937524],
-#         'event': 'Haneda Airport runway collision'
-#     },
-#     {
-#         'event_dt': datetime(2024,2,7,0,0,0,0,timezone.utc),
-#         'meshcode' : 533946403,
-#         'meshcodes': [533945592, 533946501, 533946502,
-#                      533945494, 533946403, 533946404,
-#                      533945492, 533946401, 533946402],
-#         'event': 'Taylor Swift – The Eras Tour (Tokyo Dome)'
-#     },
-#     {
-#         'event_dt': datetime(2024,1,1,0,0,0,0,timezone.utc),
-#         'meshcode' : 533946403,
-#         'meshcodes': [533945592, 533946501, 533946502,
-#                      533945494, 533946403, 533946404,
-#                      533945492, 533946401, 533946402],
-#         'event': 'Bruno Mars - (Tokyo Dome)'
-#     },
-#     {
-#         'event_dt': datetime(2024,8,11,10,0,0,0,timezone.utc),
-#         'meshcode' : 533947534,
-#         'meshcodes': [533947631, 533947632, 533947641,
-#                      533947533, 533947534, 533947543,
-#                      533947531, 533947532, 533947541],
-#         'event': 'Comic Market 104 (Tokyo Big Sight)'
-#     },
-#     {
-#         'event_dt': datetime(2024,9,28,10,0,0,0,timezone.utc),
-#         'meshcode' : 534041724,
-#         'meshcodes': [534041821, 534041822, 534041831,
-#                      534041723, 534041724, 534041733,
-#                      534041721, 534041722, 534041731],
-#         'event': 'Tokyo Game Show 2024 (Makuhari Messe)'
-#     },
-#     {
-#         'event_dt' : datetime(2024,1,1,16,0,0,0,timezone.utc),
-#         'meshcode' : 563712214,
-#         'meshcodes' : [563712311, 563712312, 563712321,
-#              563712213, 563712214, 563712223,
-#              563712211], # 3x3 from left→right, top→bottom (center/main=563712214)
-#         'event' : 'Noto Peninsula Earthquake (Mw7.5)'
-#     }
-# ]
-
 events = [
 
-    {
-        'event_dt': datetime(2016,4,16,1,25,0,0,timezone.utc),
-        'meshcode': 493120034,
-        'meshcodes': [493120131, 493120132, 493120141,
-                      493120033, 493120034, 493120043,
-                      493120031, 493120032, 493120041],
-        'event': '2016 Kumamoto Earthquakes (Mw7.0 mainshock)'
-    },
+    # {
+    #     'event_dt': datetime(2016,4,16,1,25,0,0,timezone.utc),
+    #     'meshcode': 493120034,
+    #     'meshcodes': [493120131, 493120132, 493120141,
+    #                   493120033, 493120034, 493120043,
+    #                   493120031, 493120032, 493120041],
+    #     'event': '2016 Kumamoto Earthquakes (Mw7.0 mainshock)'
+    # },
 
-    {
-        'event_dt': datetime(2018,6,18,7,58,0,0,timezone.utc),
-        'meshcode': 523524094,
-        'meshcodes': [523506211, 523506212, 523506213,
-                      523506221, 523506222, 523506223,
-                      523506231, 523506232, 523506233],
-        'event': 'Osaka Earthquake (Mw6.1)'
-    },
+    # {
+    #     'event_dt': datetime(2018,6,18,7,58,0,0,timezone.utc),
+    #     'meshcode': 523524094,
+    #     'meshcodes': [523506211, 523506212, 523506213,
+    #                   523506221, 523506222, 523506223,
+    #                   523506231, 523506232, 523506233],
+    #     'event': 'Osaka Earthquake (Mw6.1)'
+    # },
 
-    {
-        'event_dt': datetime(2018,7,7,3,0,0,0,timezone.utc),
-        'meshcode': 513336214,
-        'meshcodes': [513336211, 513336212, 513336213,
-                      513336221, 513336222, 513336223,
-                      513336231, 513336232, 513336233],
-        'event': '2018 Japan Floods (Hiroshima/Okayama, Heisei san-jū nen shichigatsu gōu)'
-    },
+    # {
+    #     'event_dt': datetime(2018,7,7,3,0,0,0,timezone.utc),
+    #     'meshcode': 513336214,
+    #     'meshcodes': [513336211, 513336212, 513336213,
+    #                   513336221, 513336222, 513336223,
+    #                   513336231, 513336232, 513336233],
+    #     'event': '2018 Japan Floods (Hiroshima/Okayama, Heisei san-jū nen shichigatsu gōu)'
+    # },
 
-    {
-        'event_dt': datetime(2018,9,6,3,8,0,0,timezone.utc),
-        'meshcode': 644142113,
-        'meshcodes': [644142111, 644142112, 644142113,
-                      644142121, 644142122, 644142123,
-                      644142131, 644142132, 644142133],
-        'event': 'Hokkaidō Eastern Iburi Earthquake (Mw6.6)'
-    },
+    # {
+    #     'event_dt': datetime(2018,9,6,3,8,0,0,timezone.utc),
+    #     'meshcode': 644142113,
+    #     'meshcodes': [644142111, 644142112, 644142113,
+    #                   644142121, 644142122, 644142123,
+    #                   644142131, 644142132, 644142133],
+    #     'event': 'Hokkaidō Eastern Iburi Earthquake (Mw6.6)'
+    # },
 
-    {
-        'event_dt': datetime(2019,10,12,9,0,0,0,timezone.utc),
-        'meshcode': 533946403,
-        'meshcodes': [533945592, 533946501, 533946502,
-                      533945494, 533946403, 533946404,
-                      533945492, 533946401, 533946402],
-        'event': 'Typhoon Hagibis (Tokyo Metropolitan Evacuations)'
-    },
+    # {
+    #     'event_dt': datetime(2019,10,12,9,0,0,0,timezone.utc),
+    #     'meshcode': 533946403,
+    #     'meshcodes': [533945592, 533946501, 533946502,
+    #                   533945494, 533946403, 533946404,
+    #                   533945492, 533946401, 533946402],
+    #     'event': 'Typhoon Hagibis (Tokyo Metropolitan Evacuations)'
+    # },
 
     {
         'event_dt': datetime(2024,1,1,16,0,0,0,timezone.utc),
@@ -146,12 +94,28 @@ events = [
 
     {
         'event_dt': datetime(2024,1,2,17,0,0,0,timezone.utc),
-        'meshcode': 533937621,
-        'meshcodes': [533937614, 533937623, 533937624,
-                      533937612, 533937621, 533937622,
-                      533937514, 533937523, 533937524],
+        'meshcode': 533926621,
+        'meshcodes': [533926614, 533926623, 533926624,
+                      533926612, 533926621, 533926622,
+                      533926514, 533926523, 533926524],
         'event': 'Haneda Airport runway collision'
-    }
+    },
+    
+        {
+        'event_dt': datetime(2019,10,12,17,0,0,0,timezone.utc),
+        'meshcode': 564003222,
+        'meshcodes': [564003222],
+        'event': 'Typhoon Hagibis (Koriyama)'
+    },
+        
+        {
+        'event_dt': datetime(2021,7,3,10,30,0,0,timezone.utc),
+        'meshcode': 523950251,
+        'meshcodes': [523950244, 523950253, 523950254,
+                      523950242, 523950251, 523950252,
+                      523950144, 523950153, 523950154],
+        'event': 'Atami (Isuzan) Landslide'
+    },
 
 ]
 
