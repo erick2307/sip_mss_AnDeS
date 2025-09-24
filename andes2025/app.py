@@ -27,6 +27,9 @@ from typing import List, Tuple, Optional
 import time
 import platform
 import psutil
+import geopandas as gpd
+import json
+import tempfile
 warnings.filterwarnings('ignore')
 
 # Import core ANDES functionality
@@ -37,52 +40,6 @@ from core import LazyDatabase, ScampAnomalyDetector, DataGenerator
 from datetime import timezone
 
 events = [
-
-    # {
-    #     'event_dt': datetime(2016,4,16,1,25,0,0,timezone.utc),
-    #     'meshcode': 493120034,
-    #     'meshcodes': [493120131, 493120132, 493120141,
-    #                   493120033, 493120034, 493120043,
-    #                   493120031, 493120032, 493120041],
-    #     'event': '2016 Kumamoto Earthquakes (Mw7.0 mainshock)'
-    # },
-
-    # {
-    #     'event_dt': datetime(2018,6,18,7,58,0,0,timezone.utc),
-    #     'meshcode': 523524094,
-    #     'meshcodes': [523506211, 523506212, 523506213,
-    #                   523506221, 523506222, 523506223,
-    #                   523506231, 523506232, 523506233],
-    #     'event': 'Osaka Earthquake (Mw6.1)'
-    # },
-
-    # {
-    #     'event_dt': datetime(2018,7,7,3,0,0,0,timezone.utc),
-    #     'meshcode': 513336214,
-    #     'meshcodes': [513336211, 513336212, 513336213,
-    #                   513336221, 513336222, 513336223,
-    #                   513336231, 513336232, 513336233],
-    #     'event': '2018 Japan Floods (Hiroshima/Okayama, Heisei san-jū nen shichigatsu gōu)'
-    # },
-
-    # {
-    #     'event_dt': datetime(2018,9,6,3,8,0,0,timezone.utc),
-    #     'meshcode': 644142113,
-    #     'meshcodes': [644142111, 644142112, 644142113,
-    #                   644142121, 644142122, 644142123,
-    #                   644142131, 644142132, 644142133],
-    #     'event': 'Hokkaidō Eastern Iburi Earthquake (Mw6.6)'
-    # },
-
-    # {
-    #     'event_dt': datetime(2019,10,12,9,0,0,0,timezone.utc),
-    #     'meshcode': 533946403,
-    #     'meshcodes': [533945592, 533946501, 533946502,
-    #                   533945494, 533946403, 533946404,
-    #                   533945492, 533946401, 533946402],
-    #     'event': 'Typhoon Hagibis (Tokyo Metropolitan Evacuations)'
-    # },
-
     {
         'event_dt': datetime(2024,1,1,16,0,0,0,timezone.utc),
         'meshcode': 563712214,
@@ -104,7 +61,9 @@ events = [
         {
         'event_dt': datetime(2019,10,12,17,0,0,0,timezone.utc),
         'meshcode': 564003222,
-        'meshcodes': [564003222],
+        'meshcodes': [564003114, 564003103, 564003113,
+                      564003623, 564003222, 564003231,
+                      564003523, 564003504, 564003624],
         'event': 'Typhoon Hagibis (Koriyama)'
     },
         
@@ -696,6 +655,186 @@ def load_mss_data_single_year(year: int, mesh_id_list: List[str], multi_mesh_ana
         log_message(f"Error loading data: {e}", "error")
         return pd.DataFrame()
 
+# GeoJSON Processing Functions
+@st.cache_data
+def load_japan_mesh_source(mesh_path="/Volumes/Pegasus32/japan/mesh/japan_mesh4_CRS84.geojson"):
+    """Load the Japan mesh source file."""
+    try:
+        # Check alternative paths if the default doesn't exist
+        alternative_paths = [
+            mesh_path,
+            "/Users/erick/Documents/GitHub/sip_mss_AnDeS/data/japan_mesh4_CRS84.geojson",
+            "./data/japan_mesh4_CRS84.geojson",
+            "../data/japan_mesh4_CRS84.geojson"
+        ]
+        
+        working_path = None
+        for path in alternative_paths:
+            if os.path.exists(path):
+                working_path = path
+                break
+        
+        if working_path:
+            st.info(f"Loading Japan mesh data from: {working_path}... This may take a moment.")
+            
+            # Try to load a sample first to check structure
+            sample_mesh = gpd.read_file(working_path, rows=10)
+            log_message(f"Sample loaded with columns: {list(sample_mesh.columns)}", "info")
+            
+            # Load the full dataset
+            japan_mesh = gpd.read_file(working_path)
+            log_message(f"Japan mesh loaded: {len(japan_mesh)} mesh regions with columns: {list(japan_mesh.columns)}", "info")
+            
+            # Ensure there's a mesh ID column
+            mesh_id_cols = [col for col in japan_mesh.columns if 'MESH' in col.upper() and '4' in col]
+            if not mesh_id_cols:
+                # Look for any ID-like column
+                mesh_id_cols = [col for col in japan_mesh.columns if 'ID' in col.upper() or 'CODE' in col.upper()]
+            
+            if mesh_id_cols:
+                log_message(f"Found potential mesh ID columns: {mesh_id_cols}", "info")
+            else:
+                st.warning("No obvious mesh ID column found in Japan mesh data")
+                
+            return japan_mesh
+        else:
+            st.error(f"""
+            Japan mesh file not found at any of these locations:
+            - {mesh_path}
+            - /Users/erick/Documents/GitHub/sip_mss_AnDeS/data/japan_mesh4_CRS84.geojson
+            - ./data/japan_mesh4_CRS84.geojson
+            - ../data/japan_mesh4_CRS84.geojson
+            
+            Please make sure the Pegasus32 volume is mounted or copy the mesh file to one of the alternative locations.
+            """)
+            log_message("Japan mesh file not found at any alternative paths", "error")
+            return None
+    except Exception as e:
+        st.error(f"Error loading Japan mesh: {e}")
+        log_message(f"Error loading Japan mesh: {e}", "error")
+        return None
+
+def process_uploaded_geojson(uploaded_file):
+    """Process uploaded GeoJSON file and return as GeoDataFrame."""
+    try:
+        if uploaded_file is not None:
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".geojson") as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_file.flush()
+                
+                # Read GeoJSON
+                gdf = gpd.read_file(tmp_file.name)
+                
+                # Clean up temp file
+                os.unlink(tmp_file.name)
+                
+                # Ensure CRS is set to WGS84 if not specified
+                if gdf.crs is None:
+                    gdf.set_crs("EPSG:4326", inplace=True)
+                
+                log_message(f"GeoJSON loaded: {len(gdf)} polygons, CRS: {gdf.crs}", "info")
+                return gdf
+        return None
+    except Exception as e:
+        st.error(f"Error processing GeoJSON file: {e}")
+        return None
+
+def extract_mesh_ids_from_polygon(polygon_gdf, japan_mesh_gdf):
+    """Extract MeshID4 codes from polygon using spatial intersection."""
+    try:
+        if polygon_gdf is None or japan_mesh_gdf is None:
+            return []
+        
+        # Debug: Log the available columns
+        log_message(f"Japan mesh columns: {list(japan_mesh_gdf.columns)}", "info")
+        log_message(f"Polygon columns: {list(polygon_gdf.columns)}", "info")
+        
+        # Ensure both GeoDataFrames have the same CRS
+        if polygon_gdf.crs != japan_mesh_gdf.crs:
+            polygon_gdf = polygon_gdf.to_crs(japan_mesh_gdf.crs)
+        
+        # Perform spatial intersection
+        intersected = gpd.overlay(japan_mesh_gdf, polygon_gdf, how='intersection')
+        
+        # Try to find mesh ID column with different possible names
+        mesh_id_column = None
+        possible_columns = ['MESH4_ID', 'MESH_ID', 'meshcode', 'mesh_id', 'id', 'ID']
+        
+        for col in possible_columns:
+            if col in intersected.columns:
+                mesh_id_column = col
+                break
+        
+        if mesh_id_column:
+            mesh_ids = intersected[mesh_id_column].astype(str).tolist()
+            mesh_ids = [mid for mid in mesh_ids if mid and mid != 'nan']
+            log_message(f"Extracted {len(mesh_ids)} mesh IDs from column '{mesh_id_column}'", "info")
+            return mesh_ids
+        else:
+            available_cols = list(intersected.columns)
+            st.error(f"No mesh ID column found. Available columns: {available_cols}")
+            log_message(f"No mesh ID column found in intersected data. Available columns: {available_cols}", "error")
+            return []
+            
+    except Exception as e:
+        st.error(f"Error extracting mesh IDs: {e}")
+        log_message(f"Error in extract_mesh_ids_from_polygon: {e}", "error")
+        return []
+
+def create_mesh_visualization_plot(mesh_gdf, polygon_gdf=None, population_data=None):
+    """Create a matplotlib plot similar to plot_gdf from ntt_dev.py but adapted for Streamlit."""
+    try:
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        
+        # Plot mesh data
+        if population_data is not None and 'population' in mesh_gdf.columns:
+            # Plot with population data
+            im = mesh_gdf.plot(
+                ax=ax,
+                column="population",
+                cmap="viridis",
+                alpha=0.7,
+                legend=True,
+                legend_kwds={"label": "Population", "shrink": 0.8}
+            )
+        else:
+            # Plot without population data
+            mesh_gdf.plot(ax=ax, alpha=0.7, color='blue', edgecolor='black', linewidth=0.5)
+        
+        # Plot polygon overlay if provided
+        if polygon_gdf is not None:
+            polygon_gdf.plot(ax=ax, alpha=0.3, color='red', edgecolor='red', linewidth=2)
+        
+        # Try to add basemap (optional, may fail if contextily not available)
+        try:
+            import contextily as ctx
+            ctx.add_basemap(
+                ax,
+                crs=mesh_gdf.crs.to_string(),
+                source=ctx.providers.OpenStreetMap.Mapnik,
+                attribution=False,
+                alpha=0.8
+            )
+        except ImportError:
+            pass  # Skip basemap if contextily not available
+        except Exception:
+            pass  # Skip basemap if any other error occurs
+        
+        ax.set_title("Mesh Visualization with Selected Area")
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
+        
+        # Set aspect ratio and tight layout
+        ax.set_aspect('equal')
+        plt.tight_layout()
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating visualization: {e}")
+        return None
+
 class RealTimeAnomalyDetector:
     """Real-time anomaly detector using core SCAMP functionality."""
     
@@ -975,28 +1114,120 @@ def main():
                 multi_mesh_analysis = False
             
     else:
-        # Custom mesh ID selection (fallback to original behavior)
-        available_mesh_ids = get_available_mesh_ids()
-        selected_mesh = st.sidebar.selectbox("Select Mesh ID Range", available_mesh_ids)
+        # GeoJSON Polygon Upload Feature
+        st.sidebar.subheader("📐 Area Selection")
         
-        # Custom mesh ID input
-        st.sidebar.subheader("🔢 Custom Mesh IDs")
-        custom_mesh_input = st.sidebar.text_area(
-            "Input Mesh ID Range", 
-            placeholder="Enter mesh IDs separated by commas\nExample: 533937621, 533946403, 533947534",
-            help="Enter one or more mesh ID codes separated by commas"
+        # Option to select area method
+        area_method = st.sidebar.radio(
+            "Select Area Method:",
+            options=["Upload GeoJSON Polygon", "Manual Mesh IDs"],
+            help="Choose how to define the analysis area"
         )
         
-        # Parse custom mesh IDs
-        if custom_mesh_input.strip():
-            mesh_id_list = [mesh.strip() for mesh in custom_mesh_input.split(',') if mesh.strip()]
+        if area_method == "Upload GeoJSON Polygon":
+            # GeoJSON file uploader
+            uploaded_geojson = st.sidebar.file_uploader(
+                "Upload GeoJSON Polygon File", 
+                type=["geojson", "json"],
+                help="Upload a GeoJSON file containing polygon(s) to define the analysis area"
+            )
+            
+            if uploaded_geojson is not None:
+                # Process uploaded GeoJSON
+                polygon_gdf = process_uploaded_geojson(uploaded_geojson)
+                
+                if polygon_gdf is not None:
+                    # Check if the uploaded file is already a mesh file (has MESH4_ID column)
+                    if 'MESH4_ID' in polygon_gdf.columns:
+                        st.sidebar.info("🎯 Detected that uploaded file contains mesh data!")
+                        
+                        # Use the uploaded file directly as mesh data
+                        mesh_ids = polygon_gdf['MESH4_ID'].astype(str).tolist()
+                        mesh_ids = [mid for mid in mesh_ids if mid and mid != 'nan']
+                        
+                        if mesh_ids:
+                            mesh_id_list = mesh_ids
+                            multi_mesh_analysis = len(mesh_id_list) > 1
+                            
+                            st.sidebar.success(f"✅ Found {len(mesh_id_list)} mesh regions")
+                            st.sidebar.write(f"**Mesh IDs:** {', '.join(mesh_id_list[:5])}{'...' if len(mesh_id_list) > 5 else ''}")
+                            
+                            # Store data for visualization
+                            st.session_state.uploaded_polygon = polygon_gdf
+                            st.session_state.extracted_mesh_gdf = polygon_gdf
+                        else:
+                            st.sidebar.error("❌ No valid mesh IDs found in file")
+                            mesh_id_list = []
+                            multi_mesh_analysis = False
+                    else:
+                        # Load Japan mesh data for intersection
+                        japan_mesh = load_japan_mesh_source()
+                        
+                        if japan_mesh is not None:
+                            # Extract mesh IDs
+                            extracted_mesh_ids = extract_mesh_ids_from_polygon(polygon_gdf, japan_mesh)
+                            
+                            if extracted_mesh_ids:
+                                mesh_id_list = extracted_mesh_ids
+                                multi_mesh_analysis = len(mesh_id_list) > 1
+                                
+                                st.sidebar.success(f"✅ Found {len(mesh_id_list)} mesh regions")
+                                st.sidebar.write(f"**Mesh IDs:** {', '.join(mesh_id_list[:5])}{'...' if len(mesh_id_list) > 5 else ''}")
+                                
+                                # Store polygon data for visualization
+                                st.session_state.uploaded_polygon = polygon_gdf
+                                
+                                # Find mesh ID column for filtering
+                                mesh_id_col = None
+                                possible_cols = ['MESH4_ID', 'MESH_ID', 'meshcode', 'mesh_id', 'id', 'ID']
+                                for col in possible_cols:
+                                    if col in japan_mesh.columns:
+                                        mesh_id_col = col
+                                        break
+                                
+                                if mesh_id_col:
+                                    st.session_state.extracted_mesh_gdf = japan_mesh[japan_mesh[mesh_id_col].astype(str).isin(mesh_id_list)]
+                                else:
+                                    st.session_state.extracted_mesh_gdf = japan_mesh
+                            else:
+                                st.sidebar.error("❌ No mesh regions found in the polygon area")
+                                mesh_id_list = []
+                                multi_mesh_analysis = False
+                        else:
+                            st.sidebar.error("❌ Could not load Japan mesh data")
+                            mesh_id_list = []
+                            multi_mesh_analysis = False
+                else:
+                    st.sidebar.error("❌ Could not process GeoJSON file")
+                    mesh_id_list = []
+                    multi_mesh_analysis = False
+            else:
+                st.sidebar.info("📁 Please upload a GeoJSON file to define the analysis area")
+                mesh_id_list = []
+                multi_mesh_analysis = False
         else:
-            # Use selected mesh as single item list
-            mesh_id_list = [selected_mesh]
-        
-        # Multi-mesh analysis option for custom selection
-        multi_mesh_analysis = st.sidebar.checkbox("Multi-mesh analysis", value=False, 
-                                                 help="Aggregate data from all provided mesh IDs")
+            # Manual mesh ID selection (original behavior)
+            available_mesh_ids = get_available_mesh_ids()
+            selected_mesh = st.sidebar.selectbox("Select Mesh ID Range", available_mesh_ids)
+            
+            # Custom mesh ID input
+            st.sidebar.subheader("🔢 Custom Mesh IDs")
+            custom_mesh_input = st.sidebar.text_area(
+                "Input Mesh ID Range", 
+                placeholder="Enter mesh IDs separated by commas\nExample: 533937621, 533946403, 533947534",
+                help="Enter one or more mesh ID codes separated by commas"
+            )
+            
+            # Parse custom mesh IDs
+            if custom_mesh_input.strip():
+                mesh_id_list = [mesh.strip() for mesh in custom_mesh_input.split(',') if mesh.strip()]
+            else:
+                # Use selected mesh as single item list
+                mesh_id_list = [selected_mesh]
+            
+            # Multi-mesh analysis option for custom selection
+            multi_mesh_analysis = st.sidebar.checkbox("Multi-mesh analysis", value=False, 
+                                                     help="Aggregate data from all provided mesh IDs")
     
     # Detection parameters
     st.sidebar.subheader("🔧 Detection Parameters")
@@ -2493,6 +2724,74 @@ def historical_analysis():
     
     # Determine value column
     value_col = 'population' if 'population' in filtered_data.columns else 'value'
+    
+    # Area Visualization Section
+    if 'uploaded_polygon' in st.session_state and 'extracted_mesh_gdf' in st.session_state:
+        st.subheader("🗺️ Area Visualization")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col2:
+            st.write("**Visualization Options:**")
+            show_population = st.checkbox("Show Population Data", value=True, 
+                                        help="Color mesh regions based on population data")
+            
+            if st.button("🗺️ Generate Area Map", type="primary"):
+                with st.spinner("Creating area visualization..."):
+                    try:
+                        # Get mesh data with population if available
+                        mesh_gdf = st.session_state.extracted_mesh_gdf.copy()
+                        polygon_gdf = st.session_state.uploaded_polygon.copy()
+                        
+                        # Add population data if requested and data is available
+                        if show_population and not filtered_data.empty:
+                            # For simplicity, use mean population for each mesh
+                            pop_data = filtered_data.groupby('mesh_id')[value_col].mean().reset_index()
+                            pop_data['mesh_id'] = pop_data['mesh_id'].astype(str)
+                            
+                            # Find the mesh ID column in the mesh_gdf
+                            mesh_id_col = None
+                            possible_cols = ['MESH4_ID', 'MESH_ID', 'meshcode', 'mesh_id', 'id', 'ID']
+                            for col in possible_cols:
+                                if col in mesh_gdf.columns:
+                                    mesh_id_col = col
+                                    break
+                            
+                            if mesh_id_col:
+                                mesh_gdf[mesh_id_col] = mesh_gdf[mesh_id_col].astype(str)
+                                mesh_gdf = mesh_gdf.merge(pop_data, left_on=mesh_id_col, right_on='mesh_id', how='left')
+                                mesh_gdf['population'] = mesh_gdf[value_col].fillna(0)
+                                log_message(f"Merged population data using column: {mesh_id_col}", "info")
+                            else:
+                                log_message("Could not find mesh ID column for population data merge", "warning")
+                                show_population = False  # Disable population visualization
+                        
+                        # Create the plot
+                        fig = create_mesh_visualization_plot(
+                            mesh_gdf, 
+                            polygon_gdf, 
+                            population_data=filtered_data if show_population else None
+                        )
+                        
+                        if fig is not None:
+                            st.pyplot(fig)
+                            log_message("Area visualization created successfully", "info")
+                        else:
+                            st.error("Failed to create area visualization")
+                            
+                    except Exception as e:
+                        st.error(f"Error creating visualization: {e}")
+                        log_message(f"Error in area visualization: {e}", "error")
+        
+        with col1:
+            st.write("**Area Information:**")
+            mesh_count = len(st.session_state.extracted_mesh_gdf)
+            polygon_count = len(st.session_state.uploaded_polygon)
+            st.write(f"📍 **Polygons uploaded:** {polygon_count}")
+            st.write(f"🗺️ **Mesh regions found:** {mesh_count}")
+            if not filtered_data.empty:
+                st.write(f"📊 **Data points:** {len(filtered_data)}")
+                st.write(f"📅 **Time range:** {filtered_data['timestamp'].min().strftime('%Y-%m-%d')} to {filtered_data['timestamp'].max().strftime('%Y-%m-%d')}")
     
     # Statistics
     st.subheader("📊 Statistical Summary")
