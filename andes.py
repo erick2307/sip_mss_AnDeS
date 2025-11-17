@@ -111,22 +111,32 @@ def andes(data, num_days, cur, stream_point, meshcode):
     # print(f"Factor: {factor}")
     # print(f"Max: {af.max()}, Min: {af.min()}")
     # print(f"Mean: {af.mean()}, Std: {af.std()}")
-    return T, stream._left_P[-1] > (af.mean() + int(factor) * af.std())
+    ic(af[-1])
+    return T, af[-1] > (af.mean() + int(factor) * af.std())
+    # return T, stream._left_P[-1] > (af.mean() + int(factor) * af.std())
 
 
 # YOU MAY RUN THIS ONCE TO LOAD THE DATABASE
 db = read_database(start=2016, stop=2024)
 
 #===== ONE EVENT MANY MESHESCODES ==========================================================
-event_dt = datetime(2022,3,16,23,0,0,0,timezone) # Fukushima EQ
-meshcodes = [ 574007614,  574007623,  574007624,  574007633,  574007634,
-574007612,  574007621,  574007622,  574007631,  574007632, 
-574007514,  574007523,  574007524,  574007533,  574007534,
-574007512,  574007521,  574007522,  574007531,  574007532,
-574007414,  574007423,  574007424,  574007433,  574007434,
-574007412,  574007421,  574007422,  574007431,  574007432,
-574007314,  574007323,  574007324,  574007333,  574007334 ]
-event = 'Fukushima EQ'
+# event_dt = datetime(2022,3,16,23,0,0,0,timezone) # Fukushima EQ
+# meshcodes = [ 574007614,  574007623,  574007624,  574007633,  574007634,
+# 574007612,  574007621,  574007622,  574007631,  574007632, 
+# 574007514,  574007523,  574007524,  574007533,  574007534,
+# 574007512,  574007521,  574007522,  574007531,  574007532,
+# 574007414,  574007423,  574007424,  574007433,  574007434,
+# 574007412,  574007421,  574007422,  574007431,  574007432,
+# 574007314,  574007323,  574007324,  574007333,  574007334 ]
+# event = 'Fukushima EQ'
+#====== END OF EVENT ==========================================================
+
+#===== ONE EVENT MANY MESHESCODES ==========================================================
+event_dt = datetime(2024,1,1,16,0,0,0,timezone) # date and time (hour) (datetime)
+meshcodes = [563712311, 563712312, 563712321,
+             563712213, 563712214, 563712223,
+             563712211] # 3x3 from left→right, top→bottom (center/main=563712214)
+event = 'Noto Peninsula Earthquake (Mw7.5)' # name of the event (str)
 #====== END OF EVENT ==========================================================
 
 for meshcode in meshcodes:
