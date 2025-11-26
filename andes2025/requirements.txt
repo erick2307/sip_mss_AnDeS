@@ -15,15 +15,15 @@ cligj==0.7.2
 colorama==0.4.6
 comm==0.2.3
 contextily==1.6.2
-contourpy @ file:///Users/runner/miniforge3/conda-bld/contourpy_1756544647577/work
+contourpy
 coverage==7.10.7
-cycler @ file:///home/conda/feedstock_root/build_artifacts/cycler_1733332471406/work
+cycler
 debugpy==1.8.16
 decorator==5.2.1
 diskcache==5.6.3
 exceptiongroup==1.3.0
 executing==2.2.1
-fonttools @ file:///Users/runner/miniforge3/conda-bld/fonttools_1758132644965/work
+fonttools
 geographiclib==2.1
 geopandas==1.1.1
 geopy==2.4.1
@@ -44,7 +44,7 @@ jsonschema==4.25.1
 jsonschema-specifications==2025.9.1
 jupyter_client==8.6.3
 jupyter_core==5.8.1
-kiwisolver @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_kiwisolver_1756467597/work
+kiwisolver
 llvmlite==0.43.0
 MarkupSafe==3.0.2
 matplotlib==3.10.6
@@ -55,13 +55,13 @@ narwhals==2.5.0
 nest-asyncio==1.6.0
 numba==0.60.0
 numpy==2.0.2
-packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1745345660/work
-pandas @ file:///Users/runner/miniforge3/conda-bld/pandas_1755779027131/work
+packaging
+pandas
 parso==0.8.5
-patsy @ file:///home/conda/feedstock_root/build_artifacts/patsy_1733792384640/work
+patsy
 pexpect==4.9.0
 pickleshare==0.7.5
-pillow @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_pillow_1758208741/work
+pillow
 platformdirs==4.4.0
 plotly==6.3.0
 pluggy==1.6.0
@@ -76,12 +76,12 @@ pydantic_core==2.33.2
 pydeck==0.9.1
 Pygments==2.19.2
 pyogrio==0.11.1
-pyparsing @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pyparsing_1757767060/work
+pyparsing
 pyproj==3.7.2
 pytest==8.4.2
 pytest-cov==7.0.0
-python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
-pytz @ file:///home/conda/feedstock_root/build_artifacts/pytz_1742920838005/work
+python-dateutil
+pytz
 PyYAML==6.0.2
 pyzmq==27.1.0
 rasterio==1.4.3
@@ -92,10 +92,10 @@ scipy==1.14.0
 seaborn==0.13.2
 setuptools==80.9.0
 shapely==2.1.1
-six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
+six
 smmap==5.0.2
 stack-data==0.6.3
-statsmodels @ file:///Users/runner/miniforge3/conda-bld/statsmodels_1751917615882/work
+statsmodels
 streamlit==1.49.1
 streamlit-option-menu==0.4.0
 stumpy==1.12.0
@@ -108,7 +108,7 @@ types-python-dateutil==2.9.0.20240316
 typing-inspection==0.4.1
 typing_extensions==4.15.0
 tzdata==2024.1
-unicodedata2 @ file:///Users/runner/miniforge3/conda-bld/unicodedata2_1756494520617/work
+unicodedata2
 urllib3==2.5.0
 watchdog==6.0.0
 wcwidth==0.2.13
