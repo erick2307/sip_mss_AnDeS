@@ -26,4 +26,4 @@ stumpy>=1.12
 
 # Optional GPU-accelerated engine (PySCAMP).
 # Safe to leave commented out; app falls back to STUMPY if this is missing.
-pyscamp
+# pyscamp
