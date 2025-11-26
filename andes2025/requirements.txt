@@ -42,3 +42,5 @@ pytest-cov>=4.1.0
 
 #required
 psutil
+geopandas
+tempfile
