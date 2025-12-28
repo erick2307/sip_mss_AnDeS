@@ -6,8 +6,8 @@ import numpy as np
 import time
 
 Pyear = 2025
-Pmonth = 1
-Pday = 26 # available data until 23h
+Pmonth = 12
+Pday = 31 # available data until 23h
 
 def save_data():
     t0 = time.time()
@@ -41,7 +41,7 @@ def save_data():
         cur += timedelta(hours=1)
         i += 1
 
-    out = np.lib.format.open_memmap(f"./data/ntt_mss_{Pyear}.npy", mode="w+", dtype=np.int32,
+    out = np.lib.format.open_memmap(f"/Users/erick/Documents/GitHub/sip_mss_AnDeS/data/ntt_mss_{Pyear}.npy", mode="w+", dtype=np.int32,
                                     shape=(num_rows, len(data)), fortran_order=True)
 
     for i, v in enumerate(data.values()):
@@ -49,7 +49,7 @@ def save_data():
 
     out.flush()
 
-    np.save(f"./data/ntt_mss_{Pyear}_areas.npy", np.fromiter(data.keys(), dtype=np.int32))
+    np.save(f"/Users/erick/Documents/GitHub/sip_mss_AnDeS/data/ntt_mss_{Pyear}_areas.npy", np.fromiter(data.keys(), dtype=np.int32))
 
     print(f'{time.time() - t0}')
     return
