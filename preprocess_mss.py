@@ -5,9 +5,9 @@ import pandas as pd
 import numpy as np
 import time
 
-Pyear = 2025
-Pmonth = 12
-Pday = 31 # available data until 23h
+Pyear = 2026
+Pmonth = 7
+Pday = 27 # available data until 23h
 
 def save_data():
     t0 = time.time()
